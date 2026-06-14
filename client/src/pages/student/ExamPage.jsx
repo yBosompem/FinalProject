@@ -21,6 +21,24 @@ function formatTime(ms) {
   return `${m}:${s}`;
 }
 
+function countAnswered(answers, questions) {
+  return questions.reduce((n, q, i) => {
+    const a = answers.find((x) => x.questionIndex === i);
+    if ((q?.type || 'mcq') === 'short') return n + (a?.textAnswer?.trim() ? 1 : 0);
+    return n + (a?.selectedIndex != null && a.selectedIndex >= 0 ? 1 : 0);
+  }, 0);
+}
+
+const FORBIDDEN_SHORTCUT_KEYS = new Set(['c', 'v', 's', 'u', 'p']);
+
+function ShieldIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2l8 4v6c0 5.25-3.5 9.74-8 11-4.5-1.26-8-5.75-8-11V6l8-4z" />
+    </svg>
+  );
+}
+
 export default function ExamPage() {
   const { examId } = useParams();
   const navigate = useNavigate();
@@ -32,6 +50,7 @@ export default function ExamPage() {
   const [answers, setAnswers] = useState([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [remaining, setRemaining] = useState(0);
+  const [totalDuration, setTotalDuration] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const [proctoringReady, setProctoringReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -89,7 +108,9 @@ export default function ExamPage() {
               ? status.session.answers
               : emptyAnswers(examData.questions)
           );
-          setRemaining(new Date(status.session.endsAt) - Date.now());
+          const left = new Date(status.session.endsAt) - Date.now();
+          setRemaining(left);
+          setTotalDuration(left);
         }
 
         setPhase('precheck');
@@ -110,11 +131,11 @@ export default function ExamPage() {
       const sess = session || (await api.startSession(examId));
       setSession(sess);
       setAnswers(
-        sess.answers?.length
-          ? sess.answers
-          : emptyAnswers(exam.questions)
+        sess.answers?.length ? sess.answers : emptyAnswers(exam.questions)
       );
-      setRemaining(new Date(sess.endsAt) - Date.now());
+      const duration = new Date(sess.endsAt) - Date.now();
+      setRemaining(duration);
+      setTotalDuration(duration);
       setPhase('exam');
       setError('');
 
@@ -148,6 +169,41 @@ export default function ExamPage() {
     }, 15000);
     return () => clearInterval(saveTimer);
   }, [phase, session, answers]);
+
+  useEffect(() => {
+    if (phase !== 'exam') return undefined;
+
+    const block = (e) => e.preventDefault();
+
+    const handleKeyDown = (e) => {
+      if (e.key === 'PrintScreen') {
+        navigator.clipboard?.writeText('').catch(() => {});
+        window.alert('Screenshots are disabled.');
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey) {
+        if (FORBIDDEN_SHORTCUT_KEYS.has(e.key.toLowerCase())) {
+          e.preventDefault();
+          window.alert('This shortcut is disabled during the exam.');
+        }
+      }
+    };
+
+    document.addEventListener('contextmenu', block);
+    document.addEventListener('copy', block);
+    document.addEventListener('cut', block);
+    document.addEventListener('dragstart', block);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('contextmenu', block);
+      document.removeEventListener('copy', block);
+      document.removeEventListener('cut', block);
+      document.removeEventListener('dragstart', block);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [phase]);
 
   const selectAnswer = (qIndex, optionIndex) => {
     setAnswers((prev) =>
@@ -190,115 +246,179 @@ export default function ExamPage() {
     setProctoringReady(false);
   };
 
+  const handleFocusViolation = (message) => {
+    setNotifications((prev) => [message, ...prev].slice(0, 5));
+  };
+
   if (phase === 'loading') {
     return (
-      <div className="container" style={{ paddingTop: '4rem', textAlign: 'center' }}>
-        Loading exam…
+      <div className="loading-screen">
+        <div className="loading-spinner" />
+        <p>Preparing your exam environment…</p>
       </div>
     );
   }
 
   if (phase === 'blocked') {
     return (
-      <div className="container" style={{ paddingTop: '2rem' }}>
-        <div className="alert alert-error">{error}</div>
-        <button type="button" className="btn btn-ghost" onClick={() => navigate('/student')}>
-          Back to dashboard
-        </button>
+      <div className="exam-shell">
+        <div className="container" style={{ paddingTop: '3rem', maxWidth: 480 }}>
+          <div className="glass-card" style={{ padding: '2rem', textAlign: 'center' }}>
+            <div className="alert alert-error">{error}</div>
+            <button type="button" className="btn btn-ghost" onClick={() => navigate('/student')}>
+              Back to dashboard
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   const isExam = phase === 'exam';
   const question = isExam ? exam.questions[currentQ] : null;
+  const urgent = remaining < 60000;
+  const timePct = totalDuration > 0 ? Math.max(0, (remaining / totalDuration) * 100) : 0;
+  const answeredCount = isExam ? countAnswered(answers, exam.questions) : 0;
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <div className={`exam-shell${isExam ? ' exam-locked' : ''}`}>
       {isExam && (
-        <header
-          style={{
-            padding: '0.75rem 1.5rem',
-            background: 'var(--surface)',
-            borderBottom: '1px solid var(--border)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '0.5rem',
-          }}
-        >
-          <strong>{exam.title}</strong>
-          <span
-            style={{
-              fontSize: '1.25rem',
-              fontWeight: 700,
-              color: remaining < 60000 ? 'var(--danger)' : 'var(--primary)',
-            }}
-          >
-            {formatTime(remaining)}
-          </span>
-        </header>
+        <>
+          <header className="exam-topbar">
+            <div className="exam-topbar-left">
+              <span className="exam-topbar-title">{exam.title}</span>
+              <span className="exam-topbar-meta">Secure proctored session</span>
+            </div>
+
+            <div className="exam-topbar-center">
+              <div className="exam-timer">
+                <span className={`exam-timer-value${urgent ? ' exam-timer-value--urgent' : ''}`}>
+                  {formatTime(remaining)}
+                </span>
+                <div className="exam-timer-bar">
+                  <div
+                    className={`exam-timer-bar-fill${urgent ? ' exam-timer-bar-fill--urgent' : ''}`}
+                    style={{ width: `${timePct}%` }}
+                  />
+                </div>
+              </div>
+              <span className="exam-progress-pill">
+                {answeredCount} / {exam.questions.length} answered
+              </span>
+            </div>
+
+            <span className="badge badge-live">SECURED</span>
+          </header>
+
+          <div className="exam-security-strip">
+            <span className="exam-security-chip">
+              <ShieldIcon /> Tab lock active
+            </span>
+            <span className="exam-security-chip">
+              <ShieldIcon /> Copy / paste blocked
+            </span>
+            <span className="exam-security-chip">
+              <ShieldIcon /> Screenshots restricted
+            </span>
+            <span className="exam-security-chip">
+              <ShieldIcon /> AI monitoring on
+            </span>
+          </div>
+
+          {notifications.length > 0 && (
+            <div className="exam-toast-stack">
+              {notifications.slice(0, 3).map((msg, i) => (
+                <div key={`${msg}-${i}`} className="exam-toast">
+                  <span className="exam-toast-icon">!</span>
+                  <span>{msg}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      <div className="container" style={{ paddingTop: isExam ? undefined : '2rem', maxWidth: isExam ? undefined : 720 }}>
+      <div className={isExam ? 'exam-body' : 'container'} style={isExam ? undefined : { paddingTop: '2rem', maxWidth: 720 }}>
         {!isExam && (
-          <>
-            <h1 className="page-title">{exam.title}</h1>
-            <p className="page-sub">
-              Share your <strong>entire screen</strong> and turn on your webcam before the exam begins.
+          <div className="precheck-hero">
+            <h1>{exam.title}</h1>
+            <p>
+              Complete the system check below. Your entire screen, webcam, and microphone are required
+              before you can begin.
             </p>
-          </>
-        )}
 
-        {error && <div className="alert alert-error">{isExam ? error : error}</div>}
+            <div className="precheck-steps">
+              <div className={`precheck-step${proctoringReady ? ' precheck-step--done' : ''}`}>
+                <span className="precheck-step-num">{proctoringReady ? '✓' : '1'}</span>
+                <div className="precheck-step-text">
+                  <strong>Enable proctoring</strong>
+                  <span>Share entire screen, webcam, and microphone</span>
+                </div>
+              </div>
+              <div className="precheck-step">
+                <span className="precheck-step-num">2</span>
+                <div className="precheck-step-text">
+                  <strong>Review exam rules</strong>
+                  <span>{exam.rules || 'Follow all instructions from your instructor.'}</span>
+                </div>
+              </div>
+              <div className="precheck-step">
+                <span className="precheck-step-num">3</span>
+                <div className="precheck-step-text">
+                  <strong>Begin when ready</strong>
+                  <span>The timer starts immediately once you begin</span>
+                </div>
+              </div>
+            </div>
 
-        {notifications.length > 0 && isExam && (
-          <div className="alert alert-warning" style={{ marginTop: '1rem' }}>
-            <strong>Monitoring alert:</strong> {notifications[0]}
+            {error && <div className="alert alert-error">{error}</div>}
+
+            <div className="precheck-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!proctoringReady}
+                onClick={beginExam}
+              >
+                Begin exam
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  endSession();
+                  navigate('/student');
+                }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 
-        <div
-          className={isExam ? 'grid-2' : undefined}
-          style={{ marginTop: '1rem', alignItems: 'start' }}
-        >
+        {isExam && error && <div className="alert alert-error">{error}</div>}
+
+        <div className={isExam ? 'grid-2' : undefined} style={!isExam ? { marginTop: '1.5rem' } : undefined}>
           <div>
             {isExam ? (
               <>
                 <div className="exam-question-row">
-                  <div className="exam-question-main card">
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'flex-start',
-                        gap: '0.75rem',
-                        marginBottom: '0.5rem',
-                        flexWrap: 'wrap',
-                      }}
-                    >
-                      <p style={{ color: 'var(--muted)', margin: 0 }}>
+                  <div className="exam-question-main glass-card exam-question-card">
+                    <div className="exam-question-header">
+                      <span className="exam-question-label">
                         Question {question.questionNumber ?? currentQ + 1} of {exam.questions.length}
-                      </p>
+                      </span>
                       <button
                         type="button"
-                        className={`btn ${isFlagged(answers, currentQ) ? 'btn-primary' : 'btn-ghost'}`}
-                        style={{
-                          padding: '0.35rem 0.75rem',
-                          fontSize: '0.85rem',
-                          background: isFlagged(answers, currentQ)
-                            ? 'rgba(234, 179, 8, 0.35)'
-                            : undefined,
-                          borderColor: isFlagged(answers, currentQ)
-                            ? 'rgba(234, 179, 8, 0.8)'
-                            : undefined,
-                        }}
+                        className={`btn-flag${isFlagged(answers, currentQ) ? ' btn-flag--active' : ''}`}
                         onClick={() => toggleFlag(currentQ)}
                       >
-                        {isFlagged(answers, currentQ) ? 'Flagged' : 'Flag question'}
+                        {isFlagged(answers, currentQ) ? '★ Flagged' : '☆ Flag for review'}
                       </button>
                     </div>
-                    <h2 style={{ marginBottom: '1.25rem', fontSize: '1.15rem' }}>{question.text}</h2>
+
+                    <h2 className="exam-question-text">{question.text}</h2>
+
                     {(question.type || 'mcq') === 'short' ? (
                       <div className="form-group">
                         <label className="label">Your answer</label>
@@ -311,24 +431,16 @@ export default function ExamPage() {
                         />
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div className="exam-options">
                         {(question.options || []).map((opt, idx) => {
                           const selected =
                             answers.find((a) => a.questionIndex === currentQ)?.selectedIndex === idx;
                           return (
                             <label
                               key={idx}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.75rem',
-                                padding: '0.75rem',
-                                borderRadius: 8,
-                                border: `1px solid ${selected ? 'var(--primary)' : 'var(--border)'}`,
-                                background: selected ? 'rgba(59,130,246,0.1)' : 'transparent',
-                                cursor: proctoringReady ? 'pointer' : 'not-allowed',
-                              }}
+                              className={`exam-option${selected ? ' exam-option--selected' : ''}${!proctoringReady ? ' exam-option--disabled' : ''}`}
                             >
+                              <span className="exam-option-radio" />
                               <input
                                 type="radio"
                                 name={`q-${currentQ}`}
@@ -342,14 +454,15 @@ export default function ExamPage() {
                         })}
                       </div>
                     )}
-                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem', flexWrap: 'wrap' }}>
+
+                    <div className="exam-nav-actions">
                       <button
                         type="button"
                         className="btn btn-ghost"
                         disabled={currentQ === 0}
                         onClick={() => setCurrentQ((q) => q - 1)}
                       >
-                        Previous
+                        ← Previous
                       </button>
                       {currentQ < exam.questions.length - 1 ? (
                         <button
@@ -357,7 +470,7 @@ export default function ExamPage() {
                           className="btn btn-primary"
                           onClick={() => setCurrentQ((q) => q + 1)}
                         >
-                          Next
+                          Next →
                         </button>
                       ) : (
                         <button
@@ -371,6 +484,7 @@ export default function ExamPage() {
                       )}
                     </div>
                   </div>
+
                   <QuestionNavigator
                     total={exam.questions.length}
                     currentQ={currentQ}
@@ -379,34 +493,10 @@ export default function ExamPage() {
                     onJump={setCurrentQ}
                   />
                 </div>
-                <p style={{ marginTop: '1rem', fontSize: '0.85rem', color: 'var(--muted)' }}>
-                  {exam.rules}
-                </p>
+
+                {exam.rules && <p className="exam-rules">{exam.rules}</p>}
               </>
-            ) : (
-              <div style={{ marginBottom: '1rem' }}>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ width: '100%' }}
-                  disabled={!proctoringReady}
-                  onClick={beginExam}
-                >
-                  Begin exam
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{ marginTop: '0.75rem', width: '100%' }}
-                  onClick={() => {
-                    endSession();
-                    navigate('/student');
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
+            ) : null}
           </div>
 
           <ProctoringMonitor
@@ -415,6 +505,7 @@ export default function ExamPage() {
             active={isExam}
             onRiskUpdate={handleRiskUpdate}
             onScreenShareLost={handleScreenShareLost}
+            onFocusViolation={handleFocusViolation}
             onReadyChange={setProctoringReady}
           />
         </div>

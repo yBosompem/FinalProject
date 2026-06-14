@@ -1,0 +1,24 @@
+# Custom proctoring dataset for fine-tuning YOLO26.
+#
+# Layout:
+#   datasets/proctoring/
+#     images/train/
+#     images/val/
+#     labels/train/   # YOLO txt labels per image
+#     labels/val/
+#
+# Label classes (match these ids in your .txt files):
+#   0 person
+#   1 cell_phone
+#   2 laptop
+#   3 book
+
+path: ../datasets/proctoring
+train: images/train
+val: images/val
+
+names:
+  0: person
+  1: cell_phone
+  2: laptop
+  3: book

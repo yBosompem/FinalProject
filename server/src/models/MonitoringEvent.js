@@ -20,6 +20,8 @@ const monitoringEventSchema = new mongoose.Schema(
         'voice_detected',
         'whispering_detected',
         'suspicious_head_movement',
+        'tab_hidden',
+        'window_blur',
         'recording_saved',
       ],
       required: true,

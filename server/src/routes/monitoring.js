@@ -81,6 +81,8 @@ const STUDENT_EVENT_TYPES = [
   'screen_share_not_monitor',
   'voice_detected',
   'whispering_detected',
+  'tab_hidden',
+  'window_blur',
 ];
 
 router.post('/analyze/:sessionId', requireRole('student'), async (req, res) => {

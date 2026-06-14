@@ -10,7 +10,50 @@ const ALERT_LABELS = {
   voice_detected: 'Voice detected',
   whispering_detected: 'Whispering / low voice detected',
   suspicious_head_movement: 'Suspicious head movement',
+  tab_hidden: 'Left the exam screen',
+  window_blur: 'Exam window lost focus',
 };
+
+function StatusDot({ status }) {
+  const cls =
+    status === 'active'
+      ? 'proctor-status-dot--active'
+      : status === 'requesting' || status === 'pending'
+        ? 'proctor-status-dot--pending'
+        : status === 'stopped'
+          ? 'proctor-status-dot--stopped'
+          : 'proctor-status-dot--off';
+  return <span className={`proctor-status-dot ${cls}`} />;
+}
+
+function RiskRing({ score }) {
+  const radius = 22;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (score / 100) * circumference;
+  const high = score >= 55;
+  const stroke = high ? 'var(--danger)' : score >= 30 ? 'var(--warning)' : 'var(--success)';
+
+  return (
+    <div className="proctor-risk-ring" title={`Risk score: ${score}/100`}>
+      <svg width="52" height="52" viewBox="0 0 52 52">
+        <circle cx="26" cy="26" r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
+        <circle
+          cx="26"
+          cy="26"
+          r={radius}
+          fill="none"
+          stroke={stroke}
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          style={{ transition: 'stroke-dashoffset 0.6s ease, stroke 0.3s ease' }}
+        />
+      </svg>
+      <span className={`proctor-risk-value${high ? ' proctor-risk-value--high' : ''}`}>{score}</span>
+    </div>
+  );
+}
 
 async function requestEntireScreen() {
   const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -30,7 +73,7 @@ async function requestEntireScreen() {
 }
 
 const ProctoringMonitor = forwardRef(function ProctoringMonitor(
-  { sessionId, active, onRiskUpdate, onScreenShareLost, onReadyChange },
+  { sessionId, active, onRiskUpdate, onScreenShareLost, onFocusViolation, onReadyChange },
   ref
 ) {
   const webcamRef = useRef(null);
@@ -227,7 +270,7 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
         const pw = 220;
         const ph = 165;
         rctx.drawImage(cam, canvas.width - pw - 16, 16, pw, ph);
-        rctx.strokeStyle = '#3b82f6';
+        rctx.strokeStyle = '#0a84ff';
         rctx.lineWidth = 3;
         rctx.strokeRect(canvas.width - pw - 16, 16, pw, ph);
       }
@@ -323,17 +366,60 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
 
   useEffect(() => () => stopAll(), [stopAll]);
 
-  const isReady = webcamStatus === 'active' && screenStatus === 'active';
+  useEffect(() => {
+    if (!active || !sessionId) return undefined;
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) return;
+      const message = 'Suspicious Activity: You left the exam screen!';
+      window.alert(message);
+      reportEvent('tab_hidden', message, 'high', { reason: 'visibilitychange' });
+      setLastAlert({ type: 'tab_hidden', message });
+      onFocusViolation?.(message);
+    };
+
+    const handleBlur = () => {
+      if (document.hidden) return;
+      const message = 'Exam window lost focus.';
+      console.log('Exam window lost focus.');
+      reportEvent('window_blur', message, 'medium', { reason: 'blur' });
+      setLastAlert({ type: 'window_blur', message });
+      onFocusViolation?.(message);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [active, sessionId, reportEvent, onFocusViolation]);
+
+  const screenDotStatus =
+    screenStatus === 'active' ? 'active' : screenStatus === 'stopped' ? 'stopped' : 'pending';
+  const camDotStatus =
+    webcamStatus === 'active' ? 'active' : webcamStatus === 'requesting' ? 'pending' : 'off';
 
   return (
-    <div className="card" style={{ position: 'sticky', top: '1rem' }}>
-      <h3 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>Proctoring</h3>
+    <div className="proctor-panel glass-card">
+      <div className="proctor-header">
+        <div>
+          <p className="proctor-title">Live Proctoring</p>
+          {active && recordingStatus === 'recording' && (
+            <span className="badge badge-live" style={{ marginTop: '0.35rem' }}>
+              REC
+            </span>
+          )}
+        </div>
+        <RiskRing score={riskScore} />
+      </div>
 
       {!active && (
-        <div style={{ marginBottom: '1rem' }}>
-          <p style={{ fontSize: '0.9rem', color: 'var(--muted)', marginBottom: '0.75rem' }}>
-            Enable <strong>entire screen</strong>, <strong>webcam</strong>, and <strong>microphone</strong>.
-            Your session is recorded for instructor review.
+        <div className="proctor-setup">
+          <p>
+            Enable <strong>entire screen</strong>, <strong>webcam</strong>, and{' '}
+            <strong>microphone</strong>. Your session is recorded for instructor review.
           </p>
           <button
             type="button"
@@ -346,49 +432,58 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
         </div>
       )}
 
-      <div style={{ display: 'grid', gap: '0.75rem' }}>
-        <div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>
-            Entire screen
-          </p>
-          <div style={{ borderRadius: 8, overflow: 'hidden', background: '#000', aspectRatio: '16/9' }}>
-            <video ref={screenRef} muted playsInline style={{ width: '100%', display: 'block' }} />
-          </div>
-          <canvas ref={screenCanvasRef} style={{ display: 'none' }} />
+      <div className="proctor-status-grid">
+        <div className="proctor-status-item">
+          <StatusDot status={screenDotStatus} />
+          Screen
         </div>
-        <div>
-          <p style={{ fontSize: '0.75rem', color: 'var(--muted)', marginBottom: '0.35rem' }}>
-            Webcam + mic
-          </p>
-          <div style={{ borderRadius: 8, overflow: 'hidden', background: '#000', aspectRatio: '4/3' }}>
-            <video
-              ref={webcamRef}
-              muted
-              playsInline
-              style={{ width: '100%', display: 'block', transform: 'scaleX(-1)' }}
-            />
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
-          </div>
+        <div className="proctor-status-item">
+          <StatusDot status={camDotStatus} />
+          Webcam
+        </div>
+        <div className="proctor-status-item">
+          <StatusDot status={active && recordingStatus === 'recording' ? 'active' : 'off'} />
+          AI Monitor
+        </div>
+        <div className="proctor-status-item">
+          <StatusDot status={active ? 'active' : 'off'} />
+          Security
         </div>
       </div>
 
-      <p style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-        Risk:{' '}
-        <strong style={{ color: riskScore >= 55 ? 'var(--danger)' : 'var(--text)' }}>
-          {riskScore}/100
-        </strong>
-        {active && (
-          <span style={{ color: 'var(--muted)', marginLeft: 8 }}>
-            · Recording: {recordingStatus}
-          </span>
-        )}
-      </p>
+      <div>
+        <p className="proctor-feed-label">
+          Screen capture
+          {screenStatus === 'active' && <span className="badge badge-success">Live</span>}
+        </p>
+        <div className="proctor-video-wrap proctor-video-wrap--screen">
+          <video ref={screenRef} muted playsInline />
+          {active && screenStatus === 'active' && (
+            <span className="proctor-feed-badge badge badge-live">LIVE</span>
+          )}
+          <canvas ref={screenCanvasRef} style={{ display: 'none' }} />
+        </div>
+      </div>
 
-      {lastAlert && (
-        <div className="alert alert-warning" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
-          {lastAlert.message}
+      <div>
+        <p className="proctor-feed-label">
+          Identity feed
+          {webcamStatus === 'active' && <span className="badge badge-success">Live</span>}
+        </p>
+        <div className="proctor-video-wrap proctor-video-wrap--cam">
+          <video ref={webcamRef} muted playsInline />
+          <canvas ref={canvasRef} style={{ display: 'none' }} />
+        </div>
+      </div>
+
+      {active && (
+        <div className="proctor-recording-row">
+          <span>Session recording</span>
+          <span>{recordingStatus}</span>
         </div>
       )}
+
+      {lastAlert && <div className="proctor-alert">{lastAlert.message}</div>}
     </div>
   );
 });

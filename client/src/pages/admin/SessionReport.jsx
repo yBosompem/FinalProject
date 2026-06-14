@@ -16,6 +16,8 @@ const TYPE_LABELS = {
   screen_share_started: 'Screen share started',
   screen_share_stopped: 'Screen share stopped',
   screen_share_not_monitor: 'Screen not entire display',
+  tab_hidden: 'Left exam tab / minimized window',
+  window_blur: 'Exam window lost focus',
   exam_submitted: 'Exam submitted',
   recording_saved: 'Recording saved',
 };
@@ -30,6 +32,8 @@ const CHEAT_TYPES = new Set([
   'voice_detected',
   'whispering_detected',
   'screen_share_stopped',
+  'tab_hidden',
+  'window_blur',
 ]);
 
 export default function SessionReport() {

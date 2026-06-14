@@ -9,6 +9,8 @@ const RISK_WEIGHTS = {
   unusual_movement: 10,
   screen_share_stopped: 25,
   screen_share_not_monitor: 12,
+  tab_hidden: 20,
+  window_blur: 14,
 };
 
 const SEVERITY_MULTIPLIER = { low: 0.6, medium: 1, high: 1.4 };

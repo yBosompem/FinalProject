@@ -1,5 +1,5 @@
 """
-AI monitoring: OpenCV face detection, phone heuristics, head movement, motion.
+AI monitoring: OpenCV face detection, YOLO26 object detection, head movement, motion.
 TensorFlow used for normalized motion scoring.
 """
 
@@ -17,6 +17,19 @@ try:
     TF_AVAILABLE = True
 except ImportError:
     TF_AVAILABLE = False
+
+try:
+    from yolo_detector import run_yolo_detections, yolo_status
+
+    YOLO_AVAILABLE = True
+except ImportError:
+    YOLO_AVAILABLE = False
+
+    def run_yolo_detections(*_args, **_kwargs):
+        return []
+
+    def yolo_status():
+        return {'loaded': False, 'weights': None}
 
 _prev_frames: dict[str, np.ndarray] = {}
 _look_away_streak: dict[str, int] = {}
@@ -189,8 +202,16 @@ def analyze_frame(image_b64: str, session_id: str = 'default') -> dict[str, Any]
                 'severity': 'high',
                 'message': 'Possible mobile phone or device detected in frame',
                 'risk_delta': 28,
-                'metadata': {},
+                'metadata': {'source': 'heuristic'},
             })
+
+    if YOLO_AVAILABLE:
+        yolo_hits = run_yolo_detections(frame, session_id, face_count, _cooldown_ok)
+        existing_types = {d['type'] for d in detections}
+        for hit in yolo_hits:
+            if hit['type'] not in existing_types:
+                detections.append(hit)
+                existing_types.add(hit['type'])
 
     prev = _prev_frames.get(session_id)
     _prev_frames[session_id] = gray.copy()
@@ -217,6 +238,7 @@ def analyze_frame(image_b64: str, session_id: str = 'default') -> dict[str, Any]
         'face_count': face_count,
         'detections': detections,
         'frame_size': {'width': w, 'height': h},
+        'yolo': yolo_status(),
     }
 
 

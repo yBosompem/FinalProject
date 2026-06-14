@@ -60,9 +60,15 @@ export default function CreateExam() {
           return;
         }
         setQuestions(parsed);
-        setUploadMsg(`Loaded ${parsed.length} question(s). Set answers in the Answer Key tab.`);
+        const keysFromFile = parsed.filter((q) => q.hasAnswerKey).length;
+
+        setUploadMsg(
+          keysFromFile > 0
+            ? `Loaded ${parsed.length} question(s); ${keysFromFile} answer key(s) applied. Review the Answer Key tab.`
+            : `Loaded ${parsed.length} question(s). Add an "answer" column to your CSV or upload a separate answer key.`
+        );
         setError('');
-        setTab('answers');
+        setTab(keysFromFile >= parsed.length ? 'questions' : 'answers');
       } catch (err) {
         setError(err.message);
       }
@@ -78,8 +84,9 @@ export default function CreateExam() {
     reader.onload = () => {
       try {
         const updated = applyAnswerKey(questions, String(reader.result));
+        const applied = updated.filter((q) => q.hasAnswerKey).length;
         setQuestions(updated);
-        setUploadMsg(`Answer key applied to ${updated.length} question(s).`);
+        setUploadMsg(`Answer key applied to ${applied} of ${updated.length} question(s).`);
         setError('');
       } catch (err) {
         setError(err.message);
@@ -109,7 +116,8 @@ export default function CreateExam() {
           text: q.text,
           type: q.type || 'mcq',
           options: q.type === 'short' ? [] : q.options,
-          correctIndex: Number(q.correctIndex) || 0,
+          correctIndex:
+            q.correctIndex === '' || q.correctIndex == null ? 0 : Number(q.correctIndex),
           correctAnswer: q.correctAnswer || '',
         })),
         isPublished: true,
@@ -229,8 +237,8 @@ export default function CreateExam() {
               <div className="card" style={{ background: 'var(--surface2)', marginBottom: '1rem' }}>
                 <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Upload questions (CSV)</h3>
                 <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.75rem' }}>
-                  Columns: number, question, optionA, optionB, optionC, optionD. Leave options empty for
-                  short-answer items.
+                  Columns: number, question, optionA–optionD, answer (optional). Use A–D, 1–4, or option
+                  text for MCQ answers. Leave options empty for short-answer items.
                 </p>
                 <input type="file" accept=".csv,.txt" onChange={handleQuestionsUpload} />
                 <details style={{ marginTop: '0.75rem' }}>
