@@ -2,8 +2,19 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
 import Layout, { NavItem } from '../../components/Layout';
+import { useAuth } from '../../context/AuthContext';
+
+const getTimeBasedGreeting = (name) => {
+  const hour = new Date().getHours();
+  let greeting = '';
+  if (hour < 12) greeting = 'Good morning';
+  else if (hour < 18) greeting = 'Good afternoon';
+  else greeting = 'Good evening';
+  return `${greeting}, ${name || 'Instructor'}!`;
+};
 
 export default function AdminDashboard() {
+  const { user } = useAuth();
   const [exams, setExams] = useState([]);
   const [active, setActive] = useState([]);
   const [flagged, setFlagged] = useState([]);
@@ -45,7 +56,7 @@ export default function AdminDashboard() {
       }
     >
       <div className="container">
-        <h1 className="page-title">Instructor Dashboard</h1>
+        <h1 className="page-title">{getTimeBasedGreeting(user?.name)}</h1>
         <p className="page-sub">Manage exams, view every student submission, and release results</p>
         {error && <div className="alert alert-error">{error}</div>}
 

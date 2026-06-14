@@ -4,6 +4,7 @@ import { api } from '../../api/client';
 import Layout, { NavItem } from '../../components/Layout';
 import {
   parseQuestionsFile,
+  parseQuestionsFromDocx,
   applyAnswerKey,
   QUESTIONS_CSV_TEMPLATE,
   ANSWERS_CSV_TEMPLATE,
@@ -16,6 +17,7 @@ const emptyQuestion = (n = 1) => ({
   options: ['', '', '', ''],
   correctIndex: 0,
   correctAnswer: '',
+  marks: 1,
 });
 
 export default function CreateExam() {
@@ -27,10 +29,14 @@ export default function CreateExam() {
   const [maxGradePoints, setMaxGradePoints] = useState(70);
   const [rules, setRules] = useState('Keep your face visible. Do not leave the frame.');
   const [showResultsToStudents, setShowResultsToStudents] = useState(false);
+  const [availableFrom, setAvailableFrom] = useState('');
+  const [availableUntil, setAvailableUntil] = useState('');
   const [questions, setQuestions] = useState([emptyQuestion(1)]);
   const [error, setError] = useState('');
   const [uploadMsg, setUploadMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
   const updateQuestion = (index, field, value) => {
     setQuestions((qs) =>
@@ -48,33 +54,51 @@ export default function CreateExam() {
     );
   };
 
+  const processQuestionsFile = async (file) => {
+    setIsParsing(true);
+    try {
+      let parsed;
+      if (file.name.endsWith('.docx')) {
+        parsed = await parseQuestionsFromDocx(file);
+      } else {
+        const text = await file.text();
+        parsed = parseQuestionsFile(text);
+      }
+
+      if (parsed.length === 0) {
+        setError('No questions found in file.');
+        return;
+      }
+      setQuestions(parsed);
+      const keysFromFile = parsed.filter((q) => q.hasAnswerKey).length;
+
+      setUploadMsg(
+        keysFromFile > 0
+          ? `Loaded ${parsed.length} question(s); ${keysFromFile} answer key(s) applied. Review the Answer Key tab.`
+          : `Loaded ${parsed.length} question(s). Add an "answer" column to your CSV or upload a separate answer key.`
+      );
+      setError('');
+      setTab(keysFromFile >= parsed.length ? 'questions' : 'answers');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
   const handleQuestionsUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = parseQuestionsFile(String(reader.result));
-        if (parsed.length === 0) {
-          setError('No questions found in file.');
-          return;
-        }
-        setQuestions(parsed);
-        const keysFromFile = parsed.filter((q) => q.hasAnswerKey).length;
-
-        setUploadMsg(
-          keysFromFile > 0
-            ? `Loaded ${parsed.length} question(s); ${keysFromFile} answer key(s) applied. Review the Answer Key tab.`
-            : `Loaded ${parsed.length} question(s). Add an "answer" column to your CSV or upload a separate answer key.`
-        );
-        setError('');
-        setTab(keysFromFile >= parsed.length ? 'questions' : 'answers');
-      } catch (err) {
-        setError(err.message);
-      }
-    };
-    reader.readAsText(file);
+    processQuestionsFile(file);
     e.target.value = '';
+  };
+
+  const handleQuestionsDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    processQuestionsFile(file);
   };
 
   const handleAnswersUpload = (e) => {
@@ -96,6 +120,20 @@ export default function CreateExam() {
     e.target.value = '';
   };
 
+  const deleteQuestion = (indexToDelete) => {
+    setQuestions((qs) => {
+      const filtered = qs.filter((_, i) => i !== indexToDelete);
+      return filtered.map((q, i) => ({
+        ...q,
+        questionNumber: i + 1,
+      }));
+    });
+  };
+
+  const calculateTotalMarks = () => {
+    return questions.reduce((sum, q) => sum + (Number(q.marks) || 0), 0);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -111,6 +149,8 @@ export default function CreateExam() {
         durationMinutes: Number(durationMinutes),
         maxGradePoints: Number(maxGradePoints),
         rules,
+        availableFrom: availableFrom || undefined,
+        availableUntil: availableUntil || undefined,
         questions: questions.map((q, i) => ({
           questionNumber: q.questionNumber ?? i + 1,
           text: q.text,
@@ -119,6 +159,7 @@ export default function CreateExam() {
           correctIndex:
             q.correctIndex === '' || q.correctIndex == null ? 0 : Number(q.correctIndex),
           correctAnswer: q.correctAnswer || '',
+          marks: Number(q.marks) || 1,
         })),
         isPublished: true,
         showResultsToStudents,
@@ -221,6 +262,26 @@ export default function CreateExam() {
                   onChange={(e) => setRules(e.target.value)}
                 />
               </div>
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="label">Available from</label>
+                  <input
+                    className="input"
+                    type="datetime-local"
+                    value={availableFrom}
+                    onChange={(e) => setAvailableFrom(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="label">Available until</label>
+                  <input
+                    className="input"
+                    type="datetime-local"
+                    value={availableUntil}
+                    onChange={(e) => setAvailableUntil(e.target.value)}
+                  />
+                </div>
+              </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
@@ -235,12 +296,72 @@ export default function CreateExam() {
           {tab === 'questions' && (
             <>
               <div className="card" style={{ background: 'var(--surface2)', marginBottom: '1rem' }}>
-                <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Upload questions (CSV)</h3>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Upload questions (CSV / DOCX)</h3>
                 <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.75rem' }}>
-                  Columns: number, question, optionA–optionD, answer (optional). Use A–D, 1–4, or option
+                  Columns: number, question, optionA–optionD, answer (optional), marks (optional). Use A–D, 1–4, or option
                   text for MCQ answers. Leave options empty for short-answer items.
                 </p>
-                <input type="file" accept=".csv,.txt" onChange={handleQuestionsUpload} />
+                <div
+                  style={{
+                    border: `2px dashed ${dragOver ? 'var(--primary)' : 'var(--border-strong)'}`,
+                    borderRadius: '14px',
+                    padding: '2rem',
+                    textAlign: 'center',
+                    background: dragOver ? 'rgba(10, 132, 255, 0.05)' : 'transparent',
+                    transition: 'all 0.3s ease',
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleQuestionsDrop}
+                >
+                  {isParsing ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'center' }}>
+                      <div style={{
+                        width: '30px',
+                        height: '30px',
+                        border: '3px solid var(--muted)',
+                        borderTopColor: 'var(--primary)',
+                        borderRadius: '50%',
+                        animation: 'spin 0.8s linear infinite',
+                      }} />
+                      <span>Parsing file...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <p style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>
+                        Drag & drop a CSV or DOCX file here, or
+                      </p>
+                      <label
+                        style={{
+                          display: 'inline-block',
+                          padding: '0.6rem 1.5rem',
+                          background: 'var(--primary)',
+                          color: 'white',
+                          borderRadius: '999px',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease',
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.transform = 'scale(1.05)';
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.transform = 'scale(1)';
+                        }}
+                      >
+                        Browse
+                        <input
+                          type="file"
+                          accept=".csv,.txt,.docx"
+                          onChange={handleQuestionsUpload}
+                          style={{ display: 'none' }}
+                        />
+                      </label>
+                    </>
+                  )}
+                </div>
                 <details style={{ marginTop: '0.75rem' }}>
                   <summary style={{ cursor: 'pointer', fontSize: '0.85rem' }}>CSV template</summary>
                   <pre
@@ -260,7 +381,7 @@ export default function CreateExam() {
 
               {questions.map((q, qi) => (
                 <div key={qi} className="card" style={{ marginBottom: '1rem', background: 'var(--surface2)' }}>
-                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem', alignItems: 'flex-end' }}>
                     <div className="form-group" style={{ margin: 0, width: 80 }}>
                       <label className="label">Q#</label>
                       <input
@@ -269,6 +390,16 @@ export default function CreateExam() {
                         min={1}
                         value={q.questionNumber ?? qi + 1}
                         onChange={(e) => updateQuestion(qi, 'questionNumber', Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="form-group" style={{ margin: 0, width: 80 }}>
+                      <label className="label">Marks</label>
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        value={q.marks ?? 1}
+                        onChange={(e) => updateQuestion(qi, 'marks', Number(e.target.value))}
                       />
                     </div>
                     <div className="form-group" style={{ margin: 0, flex: 1, minWidth: 120 }}>
@@ -282,6 +413,14 @@ export default function CreateExam() {
                         <option value="short">Short answer</option>
                       </select>
                     </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ color: 'var(--danger)', padding: '0.5rem 0.75rem' }}
+                      onClick={() => deleteQuestion(qi)}
+                    >
+                      ✕ Delete
+                    </button>
                   </div>
                   <div className="form-group">
                     <label className="label">Question text</label>
@@ -389,9 +528,14 @@ export default function CreateExam() {
             </>
           )}
 
-          <button type="submit" className="btn btn-primary" style={{ marginTop: '1.5rem' }} disabled={loading}>
-            {loading ? 'Saving…' : `Create exam (${questions.length} questions, graded /${maxGradePoints})`}
-          </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem' }}>
+            <div className="badge" style={{ fontSize: '0.9rem', padding: '0.5rem 1rem' }}>
+              Total marks: {calculateTotalMarks()}
+            </div>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? 'Saving…' : `Create exam (${questions.length} questions, graded /${maxGradePoints})`}
+            </button>
+          </div>
         </form>
       </div>
     </Layout>

@@ -2,6 +2,16 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { api } from '../../api/client';
 import Layout, { NavItem } from '../../components/Layout';
+import { useAuth } from '../../context/AuthContext';
+
+const getTimeBasedGreeting = (name) => {
+  const hour = new Date().getHours();
+  let greeting = '';
+  if (hour < 12) greeting = 'Good morning';
+  else if (hour < 18) greeting = 'Good afternoon';
+  else greeting = 'Good evening';
+  return `${greeting}, ${name || 'Student'}!`;
+};
 
 function getAttemptState(examId, sessions) {
   const forExam = sessions.filter((s) => s.exam?._id === examId || s.exam === examId);
@@ -15,12 +25,14 @@ function getAttemptState(examId, sessions) {
 }
 
 export default function StudentDashboard() {
+  const { user } = useAuth();
   const location = useLocation();
   const [exams, setExams] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [error, setError] = useState('');
   const [resultsModal, setResultsModal] = useState(null);
   const [submitNotice, setSubmitNotice] = useState(location.state?.message || null);
+  const [activeTab, setActiveTab] = useState('available');
 
   useEffect(() => {
     if (location.state?.submitted) {
@@ -55,7 +67,7 @@ export default function StudentDashboard() {
       }
     >
       <div className="container">
-        <h1 className="page-title">My Examinations</h1>
+        <h1 className="page-title">{getTimeBasedGreeting(user?.name)}</h1>
         <p className="page-sub">
           Entire-screen sharing and webcam are required. Each exam can only be taken once.
         </p>
@@ -94,9 +106,27 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        <div className="grid-2">
+        {/* Tab Navigation */}
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+          <button
+            className={`btn ${activeTab === 'available' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '0.95rem' }}
+            onClick={() => setActiveTab('available')}
+          >
+            Available & Upcoming
+          </button>
+          <button
+            className={`btn ${activeTab === 'completed' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ fontSize: '0.95rem' }}
+            onClick={() => setActiveTab('completed')}
+          >
+            Completed Sessions
+          </button>
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'available' && (
           <section>
-            <h2 style={{ marginBottom: '1rem', fontSize: '1.1rem' }}>Available exams</h2>
             {exams.length === 0 ? (
               <p style={{ color: 'var(--muted)' }}>No published exams yet.</p>
             ) : (
@@ -131,9 +161,10 @@ export default function StudentDashboard() {
               })
             )}
           </section>
+        )}
 
+        {activeTab === 'completed' && (
           <section>
-            <h2 style={{ marginBottom: '1rem', fontSize: '1.1rem' }}>Past sessions</h2>
             {sessions.length === 0 ? (
               <p style={{ color: 'var(--muted)' }}>No sessions yet.</p>
             ) : (
@@ -188,7 +219,7 @@ export default function StudentDashboard() {
               </div>
             )}
           </section>
-        </div>
+        )}
       </div>
     </Layout>
   );

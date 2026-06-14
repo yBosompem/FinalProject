@@ -56,6 +56,38 @@ export default function ExamPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const submitLockRef = useRef(false);
+  const [strikes, setStrikes] = useState(0);
+  const [showWarning, setShowWarning] = useState(false);
+  const [warningMessage, setWarningMessage] = useState('');
+  const [displayLocked, setDisplayLocked] = useState(false);
+
+  const checkDisplaySecurity = async () => {
+    try {
+      if (window.screen?.isExtended || window.screen?.width > 4096) {
+        return false;
+      }
+      if (navigator.getDisplayMedia) {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        stream.getTracks().forEach(track => track.stop());
+      }
+    } catch (e) {
+      console.log('Display check failed (expected in some browsers)', e);
+    }
+    return true;
+  };
+
+  const logSecurityEvent = async (type, message) => {
+    if (!session) return;
+    try {
+      await api.postMonitoringEvent(session._id, {
+        type,
+        message,
+        severity: 'high',
+      });
+    } catch (e) {
+      console.error('Failed to log security event:', e);
+    }
+  };
 
   const endSession = useCallback(() => {
     proctoringRef.current?.stopAll();
@@ -127,7 +159,18 @@ export default function ExamPage() {
       setError('Enable entire-screen sharing and webcam before starting.');
       return;
     }
+    const displaySecure = await checkDisplaySecurity();
+    if (!displaySecure) {
+      setDisplayLocked(true);
+      setError('Multiple displays detected. Please disconnect external monitors.');
+      return;
+    }
     try {
+      const elem = document.documentElement;
+      if (elem.requestFullscreen) await elem.requestFullscreen();
+      else if (elem.webkitRequestFullscreen) await elem.webkitRequestFullscreen();
+      else if (elem.msRequestFullscreen) await elem.msRequestFullscreen();
+
       const sess = session || (await api.startSession(examId));
       setSession(sess);
       setAnswers(
@@ -146,6 +189,23 @@ export default function ExamPage() {
       });
     } catch (err) {
       setError(err.message);
+    }
+  };
+
+  const handleStrike = async (reason) => {
+    const newStrikes = strikes + 1;
+    setStrikes(newStrikes);
+    await logSecurityEvent('violation', reason);
+
+    if (newStrikes === 1) {
+      setWarningMessage('⚠️ Warning! You have left the exam window. Return immediately or your session will be terminated.');
+      setShowWarning(true);
+    } else if (newStrikes === 2) {
+      setWarningMessage('⚠️ FINAL WARNING! One more violation and your exam will be automatically submitted and flagged.');
+      setShowWarning(true);
+    } else if (newStrikes >= 3) {
+      await logSecurityEvent('terminated', 'Session terminated after 3 violations');
+      submitExam(true);
     }
   };
 
@@ -190,11 +250,44 @@ export default function ExamPage() {
       }
     };
 
+    let blurTimeout;
+    const handleBlur = () => {
+      clearTimeout(blurTimeout);
+      blurTimeout = setTimeout(() => {
+        handleStrike('Window lost focus');
+      }, 100);
+    };
+
+    const handleFocus = () => {
+      clearTimeout(blurTimeout);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        handleStrike('Tab switched or hidden');
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+        const elem = document.documentElement;
+        if (elem.requestFullscreen) elem.requestFullscreen().catch(() => {});
+        else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen().catch(() => {});
+        else if (elem.msRequestFullscreen) elem.msRequestFullscreen().catch(() => {});
+      }
+    };
+
     document.addEventListener('contextmenu', block);
     document.addEventListener('copy', block);
     document.addEventListener('cut', block);
     document.addEventListener('dragstart', block);
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('msfullscreenchange', handleFullscreenChange);
 
     return () => {
       document.removeEventListener('contextmenu', block);
@@ -202,8 +295,15 @@ export default function ExamPage() {
       document.removeEventListener('cut', block);
       document.removeEventListener('dragstart', block);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('msfullscreenchange', handleFullscreenChange);
+      clearTimeout(blurTimeout);
     };
-  }, [phase]);
+  }, [phase, session, strikes]);
 
   const selectAnswer = (qIndex, optionIndex) => {
     setAnswers((prev) =>
@@ -282,6 +382,80 @@ export default function ExamPage() {
 
   return (
     <div className={`exam-shell${isExam ? ' exam-locked' : ''}`}>
+      {displayLocked && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.95)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          color: 'white',
+          textAlign: 'center',
+          padding: '2rem'
+        }}>
+          <h1 style={{ color: '#e74c3c' }}>⚠️ Security Alert</h1>
+          <p style={{ fontSize: '1.25rem', marginBottom: '2rem' }}>
+            Multiple displays detected. Please disconnect any external monitors and try again.
+          </p>
+          <button
+            className="btn btn-primary"
+            onClick={async () => {
+              const secure = await checkDisplaySecurity();
+              if (secure) setDisplayLocked(false);
+            }}
+          >
+            Check Again
+          </button>
+        </div>
+      )}
+
+      {showWarning && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.85)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          color: 'white'
+        }}>
+          <div style={{
+            background: 'white',
+            color: '#333',
+            padding: '2rem',
+            borderRadius: '0.5rem',
+            maxWidth: '500px',
+            textAlign: 'center'
+          }}>
+            <h2 style={{ color: strikes >= 2 ? '#e74c3c' : '#f39c12', marginBottom: '1rem' }}>
+              {strikes >= 2 ? 'FINAL WARNING' : 'WARNING'}
+            </h2>
+            <p style={{ marginBottom: '1.5rem', fontSize: '1.1rem' }}>
+              {warningMessage}
+            </p>
+            <p style={{ marginBottom: '1.5rem', fontWeight: 'bold' }}>
+              Strikes: {strikes} / 3
+            </p>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowWarning(false)}
+            >
+              I Understand
+            </button>
+          </div>
+        </div>
+      )}
+
       {isExam && (
         <>
           <header className="exam-topbar">
@@ -304,6 +478,9 @@ export default function ExamPage() {
               </div>
               <span className="exam-progress-pill">
                 {answeredCount} / {exam.questions.length} answered
+              </span>
+              <span className="badge" style={{ marginLeft: '0.5rem', background: strikes > 0 ? '#e74c3c' : 'var(--success)' }}>
+                STRIKES: {strikes}/3
               </span>
             </div>
 

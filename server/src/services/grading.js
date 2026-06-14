@@ -58,8 +58,8 @@ function getCorrectAnswerLabel(question) {
 
 function gradeExam(exam, studentAnswers) {
   const questions = exam.questions || [];
-  const total = questions.length;
-  let correctCount = 0;
+  const totalMarks = questions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
+  let earnedMarks = 0;
 
   const questionBreakdown = questions.map((q, index) => {
     const studentAnswer =
@@ -69,12 +69,15 @@ function gradeExam(exam, studentAnswers) {
         textAnswer: '',
       };
     const isCorrect = gradeAnswer(q, studentAnswer);
-    if (isCorrect) correctCount += 1;
+    const marks = Number(q.marks) || 1;
+    if (isCorrect) earnedMarks += marks;
 
     return {
       questionNumber: q.questionNumber ?? index + 1,
       questionIndex: index,
       isCorrect,
+      marks,
+      earnedMarks: isCorrect ? marks : 0,
       studentAnswer: getStudentAnswerLabel(q, studentAnswer),
       correctAnswer: getCorrectAnswerLabel(q),
       flagged: Boolean(studentAnswer.flagged),
@@ -82,15 +85,15 @@ function gradeExam(exam, studentAnswers) {
   });
 
   const maxGradePoints = exam.maxGradePoints ?? 100;
-  const percentageScore = total > 0 ? Math.round((correctCount / total) * 10000) / 100 : 0;
+  const percentageScore = totalMarks > 0 ? Math.round((earnedMarks / totalMarks) * 10000) / 100 : 0;
   const scaledScore =
-    total > 0
-      ? Math.round(((correctCount / total) * maxGradePoints) * 100) / 100
+    totalMarks > 0
+      ? Math.round(((earnedMarks / totalMarks) * maxGradePoints) * 100) / 100
       : 0;
 
   return {
-    correctCount,
-    totalQuestions: total,
+    earnedMarks,
+    totalMarks,
     percentageScore,
     scaledScore,
     maxGradePoints,

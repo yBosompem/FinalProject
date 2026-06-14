@@ -7,6 +7,7 @@ const questionSchema = new mongoose.Schema({
   options: [{ type: String }],
   correctIndex: { type: Number, min: 0, default: 0 },
   correctAnswer: { type: String, default: '' },
+  marks: { type: Number, min: 0, default: 1 },
 });
 
 const examSchema = new mongoose.Schema(
@@ -20,6 +21,8 @@ const examSchema = new mongoose.Schema(
     isPublished: { type: Boolean, default: false },
     showResultsToStudents: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    availableFrom: { type: Date },
+    availableUntil: { type: Date },
   },
   { timestamps: true }
 );

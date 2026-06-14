@@ -1,3 +1,5 @@
+import mammoth from 'mammoth';
+
 /** Parse a CSV line respecting quoted fields */
 export function parseCSVLine(line) {
   const result = [];
@@ -63,7 +65,7 @@ export function resolveMcqAnswer(options, rawAnswer) {
 function detectQuestionsHeader(line) {
   const cols = parseCSVLine(line).map((c) => c.trim().toLowerCase());
   const looksLikeHeader = cols.some((c) =>
-    /^(number|#|q|question|option|answer|correct)/.test(c)
+    /^(number|#|q|question|option|answer|correct|marks|points|score)/.test(c)
   );
   if (!looksLikeHeader) return null;
 
@@ -76,6 +78,7 @@ function detectQuestionsHeader(line) {
     else if (/^(optionc|choicec|c)$/.test(col)) index.optionC = i;
     else if (/^(optiond|choiced|d)$/.test(col)) index.optionD = i;
     else if (/^(answer|correct|key|correctanswer)$/.test(col)) index.answer = i;
+    else if (/^(marks|points|score|point)$/.test(col)) index.marks = i;
   });
   return index;
 }
@@ -105,10 +108,9 @@ function applyAnswerToQuestion(q, rawAnswer) {
 }
 
 /**
- * Questions CSV: number, question, optionA–D, optional answer
- * Leave options empty for short-answer questions.
+ * Parse plain text (from CSV or DOCX) into questions
  */
-export function parseQuestionsFile(text) {
+export function parseQuestionsFromText(text) {
   const lines = stripBOM(text)
     .trim()
     .split(/\r?\n/)
@@ -129,6 +131,9 @@ export function parseQuestionsFile(text) {
     const opts = readOptionsFromRow(cols, header);
     const answerRaw =
       header?.answer != null ? cols[header.answer] : cols[6];
+    const marksRaw =
+      header?.marks != null ? cols[header.marks] : null;
+    const marks = marksRaw != null ? parseFloat(marksRaw) || 1 : 1;
 
     const nonEmptyOpts = opts.filter(Boolean);
 
@@ -140,6 +145,7 @@ export function parseQuestionsFile(text) {
         options: opts,
         correctIndex: 0,
         correctAnswer: '',
+        marks,
       };
       question = applyAnswerToQuestion(question, answerRaw);
       questions.push(question);
@@ -151,6 +157,7 @@ export function parseQuestionsFile(text) {
         options: [],
         correctIndex: 0,
         correctAnswer: '',
+        marks,
       };
       question = applyAnswerToQuestion(question, answerRaw);
       questions.push(question);
@@ -159,6 +166,21 @@ export function parseQuestionsFile(text) {
 
   return questions.sort((a, b) => a.questionNumber - b.questionNumber);
 }
+
+/**
+ * Parse DOCX file into plain text and then into questions
+ */
+export async function parseQuestionsFromDocx(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return parseQuestionsFromText(result.value);
+}
+
+/**
+ * Questions CSV: number, question, optionA–D, optional answer
+ * Leave options empty for short-answer questions.
+ */
+export const parseQuestionsFile = parseQuestionsFromText;
 
 /**
  * Answers CSV: number, answer
@@ -189,9 +211,9 @@ export function applyAnswerKey(questions, text) {
   });
 }
 
-export const QUESTIONS_CSV_TEMPLATE = `number,question,optionA,optionB,optionC,optionD,answer
-1,What is 2+2?,2,3,4,5,C
-2,Capital of Ghana?,,,,
+export const QUESTIONS_CSV_TEMPLATE = `number,question,optionA,optionB,optionC,optionD,answer,marks
+1,What is 2+2?,2,3,4,5,C,2
+2,Capital of Ghana?,,,,,Accra,5
 `;
 
 export const ANSWERS_CSV_TEMPLATE = `number,answer
