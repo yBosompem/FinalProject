@@ -59,6 +59,7 @@ export default function ExamPage() {
   const [error, setError] = useState('');
   const submitLockRef = useRef(false);
   const strikeRef = useRef(0);
+  const lastStrikeAtRef = useRef(0);
   const [strikes, setStrikes] = useState(0);
   const [showStrikeWarning, setShowStrikeWarning] = useState(false);
   const [strikeWarning, setStrikeWarning] = useState({ count: 0, message: '' });
@@ -112,13 +113,14 @@ export default function ExamPage() {
       if (!session || submitLockRef.current) return;
       submitLockRef.current = true;
       setSubmitting(true);
+      setShowStrikeWarning(false);
+      const recordingUpload = proctoringRef.current?.uploadRecording?.();
+      endSession();
+      if (window.electronAPI) {
+        window.electronAPI.exitExamMode();
+      }
       try {
         const result = await api.submitSession(session._id, { answers, autoSubmit });
-        const recordingUpload = proctoringRef.current?.uploadRecording?.();
-        endSession();
-        if (window.electronAPI) {
-          window.electronAPI.exitExamMode();
-        }
         recordingUpload?.catch((recordingErr) => {
           console.warn('Recording upload failed after final submission:', recordingErr.message);
         });
@@ -236,18 +238,21 @@ export default function ExamPage() {
 
   const handleStrike = async (reason) => {
     if (submitLockRef.current || strikeRef.current >= 3) return;
+    const now = Date.now();
+    if (now - lastStrikeAtRef.current < 750) return;
+    lastStrikeAtRef.current = now;
 
     const newStrikes = Math.min(strikeRef.current + 1, 3);
     strikeRef.current = newStrikes;
     setStrikes(newStrikes);
-    await logSecurityEvent('violation', reason);
+    logSecurityEvent('violation', reason);
 
     if (newStrikes >= 3) {
       setShowStrikeWarning(false);
       if (window.electronAPI) {
         window.electronAPI.exitExamMode();
       }
-      await logSecurityEvent('terminated', 'Session terminated after 3 violations');
+      logSecurityEvent('terminated', 'Session terminated after 3 violations');
       submitExam(true);
       return;
     }
@@ -260,7 +265,9 @@ export default function ExamPage() {
           : 'Final warning 2 of 3: you exited fullscreen again. One more fullscreen exit will automatically submit and end your exam.',
     });
     setShowStrikeWarning(true);
-    await returnToExamMode();
+    if (window.electronAPI) {
+      window.electronAPI.enterExamMode();
+    }
   };
 
   useEffect(() => {
@@ -314,6 +321,11 @@ export default function ExamPage() {
     const block = (e) => e.preventDefault();
 
     const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        handleStrike('Escape pressed during exam');
+        return;
+      }
+
       if (e.key === 'PrintScreen') {
         e.preventDefault();
         navigator.clipboard?.writeText('').catch(() => {});
@@ -324,6 +336,16 @@ export default function ExamPage() {
         if (FORBIDDEN_SHORTCUT_KEYS.has(e.key.toLowerCase())) {
           e.preventDefault();
         }
+      }
+    };
+
+    const handleBlur = () => {
+      handleStrike('Window lost focus');
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        handleStrike('Tab switched or hidden');
       }
     };
 
@@ -338,6 +360,8 @@ export default function ExamPage() {
     document.addEventListener('cut', block);
     document.addEventListener('dragstart', block);
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('msfullscreenchange', handleFullscreenChange);
@@ -348,6 +372,8 @@ export default function ExamPage() {
       document.removeEventListener('cut', block);
       document.removeEventListener('dragstart', block);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       document.removeEventListener('msfullscreenchange', handleFullscreenChange);

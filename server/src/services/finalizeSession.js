@@ -24,7 +24,9 @@ async function finalizeSession(sessionId, { answers, status = 'submitted', autoS
   session.status = status;
   session.submittedAt = new Date();
 
-  const events = await MonitoringEvent.find({ session: session._id });
+  const events = await MonitoringEvent.find({ session: session._id })
+    .select('type severity riskDelta')
+    .lean();
   session.riskScore = computeRiskScore(events);
   session.alertCount = events.filter((e) => e.riskDelta > 0).length;
   session.isFlagged = shouldFlag(session.riskScore, session.alertCount);
