@@ -427,7 +427,6 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     const handleVisibilityChange = () => {
       if (!document.hidden) return;
       const message = 'Suspicious Activity: You left the exam screen!';
-      window.alert(message);
       reportEvent('tab_hidden', message, 'high', { reason: 'visibilitychange' });
       setLastAlert({ type: 'tab_hidden', message });
       onFocusViolation?.(message);

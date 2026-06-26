@@ -686,14 +686,24 @@ textarea {
   flex-wrap: wrap;
 }
 
-.exam-rules {
+.exam-rules-card {
   margin-top: 1rem;
-  padding: 0.875rem 1rem;
+  padding: 1.25rem;
   border-radius: 12px;
-  font-size: 0.8125rem;
-  color: var(--muted);
+  color: var(--text);
   background: var(--surface2);
   border: 1px solid var(--border);
+}
+
+.exam-rules-card h2 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+.exam-rules-content {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: var(--text-secondary);
 }
 
 .btn-flag {

@@ -51,7 +51,6 @@ export default function ExamPage() {
   const [currentQ, setCurrentQ] = useState(0);
   const [remaining, setRemaining] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
-  const [notifications, setNotifications] = useState([]);
   const [proctoringReady, setProctoringReady] = useState(false);
   const [webcamReady, setWebcamReady] = useState(false);
   const [screenReady, setScreenReady] = useState(false);
@@ -59,9 +58,10 @@ export default function ExamPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const submitLockRef = useRef(false);
+  const strikeRef = useRef(0);
   const [strikes, setStrikes] = useState(0);
-  const [showWarning, setShowWarning] = useState(false);
-  const [warningMessage, setWarningMessage] = useState('');
+  const [showStrikeWarning, setShowStrikeWarning] = useState(false);
+  const [strikeWarning, setStrikeWarning] = useState({ count: 0, message: '' });
   const [displayLocked, setDisplayLocked] = useState(false);
 
   const checkDisplaySecurity = async () => {
@@ -74,6 +74,21 @@ export default function ExamPage() {
     }
     return true;
   };
+
+  const returnToExamMode = useCallback(async () => {
+    if (window.electronAPI) {
+      window.electronAPI.enterExamMode();
+    }
+
+    const elem = document.documentElement;
+    try {
+      if (elem.requestFullscreen) await elem.requestFullscreen();
+      else if (elem.webkitRequestFullscreen) await elem.webkitRequestFullscreen();
+      else if (elem.msRequestFullscreen) await elem.msRequestFullscreen();
+    } catch (err) {
+      console.log('Could not restore fullscreen automatically', err);
+    }
+  }, []);
 
   const logSecurityEvent = async (type, message) => {
     if (!session) return;
@@ -175,10 +190,7 @@ export default function ExamPage() {
       return;
     }
     try {
-      const elem = document.documentElement;
-      if (elem.requestFullscreen) await elem.requestFullscreen();
-      else if (elem.webkitRequestFullscreen) await elem.webkitRequestFullscreen();
-      else if (elem.msRequestFullscreen) await elem.msRequestFullscreen();
+      await returnToExamMode();
 
       const sess = session || (await api.startSession(examId));
       setSession(sess);
@@ -188,13 +200,11 @@ export default function ExamPage() {
       const duration = new Date(sess.endsAt) - Date.now();
       setRemaining(duration);
       setTotalDuration(duration);
+      strikeRef.current = 0;
+      setStrikes(0);
+      setShowStrikeWarning(false);
       setPhase('exam');
       setError('');
-
-      if (window.electronAPI) {
-        window.electronAPI.enterExamMode();
-      }
-
       await api.postMonitoringEvent(sess._id, {
         type: 'screen_share_started',
         message: 'Entire screen sharing active for exam',
@@ -225,20 +235,32 @@ export default function ExamPage() {
   };
 
   const handleStrike = async (reason) => {
-    const newStrikes = strikes + 1;
+    if (submitLockRef.current || strikeRef.current >= 3) return;
+
+    const newStrikes = Math.min(strikeRef.current + 1, 3);
+    strikeRef.current = newStrikes;
     setStrikes(newStrikes);
     await logSecurityEvent('violation', reason);
 
-    if (newStrikes === 1) {
-      setWarningMessage('⚠️ Warning! You have left the exam window. Return immediately or your session will be terminated.');
-      setShowWarning(true);
-    } else if (newStrikes === 2) {
-      setWarningMessage('⚠️ FINAL WARNING! One more violation and your exam will be automatically submitted and flagged.');
-      setShowWarning(true);
-    } else if (newStrikes >= 3) {
+    if (newStrikes >= 3) {
+      setShowStrikeWarning(false);
+      if (window.electronAPI) {
+        window.electronAPI.exitExamMode();
+      }
       await logSecurityEvent('terminated', 'Session terminated after 3 violations');
       submitExam(true);
+      return;
     }
+
+    setStrikeWarning({
+      count: newStrikes,
+      message:
+        newStrikes === 1
+          ? 'Warning 1 of 3: you exited fullscreen. You must stay in secure exam mode. The 3rd fullscreen exit will automatically submit and end your exam.'
+          : 'Final warning 2 of 3: you exited fullscreen again. One more fullscreen exit will automatically submit and end your exam.',
+    });
+    setShowStrikeWarning(true);
+    await returnToExamMode();
   };
 
   useEffect(() => {
@@ -277,7 +299,6 @@ export default function ExamPage() {
 
     return window.electronAPI.onExternalDeviceConnected((device) => {
       const message = `External device connected during exam: ${device.name || 'unknown device'}`;
-      setNotifications((prev) => [message, ...prev].slice(0, 5));
       api.postMonitoringEvent(session._id, {
         type: 'external_device_connected',
         message,
@@ -294,43 +315,21 @@ export default function ExamPage() {
 
     const handleKeyDown = (e) => {
       if (e.key === 'PrintScreen') {
+        e.preventDefault();
         navigator.clipboard?.writeText('').catch(() => {});
-        window.alert('Screenshots are disabled.');
         return;
       }
 
       if (e.ctrlKey || e.metaKey) {
         if (FORBIDDEN_SHORTCUT_KEYS.has(e.key.toLowerCase())) {
           e.preventDefault();
-          window.alert('This shortcut is disabled during the exam.');
         }
-      }
-    };
-
-    let blurTimeout;
-    const handleBlur = () => {
-      clearTimeout(blurTimeout);
-      blurTimeout = setTimeout(() => {
-        handleStrike('Window lost focus');
-      }, 100);
-    };
-
-    const handleFocus = () => {
-      clearTimeout(blurTimeout);
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        handleStrike('Tab switched or hidden');
       }
     };
 
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
-        const elem = document.documentElement;
-        if (elem.requestFullscreen) elem.requestFullscreen().catch(() => {});
-        else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen().catch(() => {});
-        else if (elem.msRequestFullscreen) elem.msRequestFullscreen().catch(() => {});
+        handleStrike('Fullscreen exited');
       }
     };
 
@@ -339,9 +338,6 @@ export default function ExamPage() {
     document.addEventListener('cut', block);
     document.addEventListener('dragstart', block);
     document.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('blur', handleBlur);
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     document.addEventListener('msfullscreenchange', handleFullscreenChange);
@@ -352,15 +348,11 @@ export default function ExamPage() {
       document.removeEventListener('cut', block);
       document.removeEventListener('dragstart', block);
       document.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('blur', handleBlur);
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
       document.removeEventListener('msfullscreenchange', handleFullscreenChange);
-      clearTimeout(blurTimeout);
     };
-  }, [phase, session, strikes]);
+  }, [phase, session, strikes, returnToExamMode]);
 
   const selectAnswer = (qIndex, optionIndex) => {
     setAnswers((prev) =>
@@ -386,25 +378,16 @@ export default function ExamPage() {
     );
   };
 
-  const handleRiskUpdate = (result) => {
-    if (result.alerts?.length) {
-      const msgs = result.alerts.map((a) => a.message).filter(Boolean);
-      if (msgs.length) {
-        setNotifications((prev) => [...msgs.slice(-2), ...prev].slice(0, 5));
-      }
-    }
+  const handleRiskUpdate = () => {
+    // AI events are recorded by the monitoring service; keep the exam UI distraction-free.
   };
 
   const handleScreenShareLost = () => {
-    setNotifications((prev) => [
-      'Screen sharing stopped — share your entire screen again or submit the exam.',
-      ...prev,
-    ]);
     setProctoringReady(false);
   };
 
-  const handleFocusViolation = (message) => {
-    setNotifications((prev) => [message, ...prev].slice(0, 5));
+  const handleFocusViolation = () => {
+    // Focus violations are logged silently and handled by the strike policy.
   };
 
   const handleProctoringStatus = useCallback((status) => {
@@ -446,6 +429,7 @@ export default function ExamPage() {
   const urgent = remaining < 60000;
   const timePct = totalDuration > 0 ? Math.max(0, (remaining / totalDuration) * 100) : 0;
   const answeredCount = isExam ? countAnswered(answers, exam.questions) : 0;
+  const visibleStrikes = Math.min(strikes, 3);
 
   return (
     <div className={`exam-shell${isExam ? ' exam-locked' : ''}`}>
@@ -482,42 +466,64 @@ export default function ExamPage() {
         </div>
       )}
 
-      {showWarning && (
+      {showStrikeWarning && (
         <div style={{
           position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'rgba(0,0,0,0.85)',
+          background: 'rgba(0,0,0,0.88)',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
           zIndex: 9999,
-          color: 'white'
+          color: 'white',
+          padding: '1.5rem'
         }}>
           <div style={{
-            background: 'white',
-            color: '#333',
+            width: 'min(480px, 100%)',
+            background: '#111827',
+            border: '1px solid #f59e0b',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+            color: 'white',
             padding: '2rem',
             borderRadius: '0.5rem',
-            maxWidth: '500px',
             textAlign: 'center'
           }}>
-            <h2 style={{ color: strikes >= 2 ? '#e74c3c' : '#f39c12', marginBottom: '1rem' }}>
-              {strikes >= 2 ? 'FINAL WARNING' : 'WARNING'}
+            <div style={{
+              width: 56,
+              height: 56,
+              borderRadius: '50%',
+              border: '2px solid #f59e0b',
+              color: '#f59e0b',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '2rem',
+              fontWeight: 800,
+              marginBottom: '1rem'
+            }}>
+              !
+            </div>
+            <h2 style={{ color: '#f59e0b', marginBottom: '1rem' }}>
+              {strikeWarning.count === 1 ? 'Fullscreen Warning' : 'Final Fullscreen Warning'}
             </h2>
-            <p style={{ marginBottom: '1.5rem', fontSize: '1.1rem' }}>
-              {warningMessage}
+            <p style={{ marginBottom: '1rem', fontSize: '1.05rem', lineHeight: 1.5 }}>
+              {strikeWarning.message}
             </p>
-            <p style={{ marginBottom: '1.5rem', fontWeight: 'bold' }}>
-              Strikes: {strikes} / 3
+            <p style={{ marginBottom: '1.5rem', fontWeight: 700 }}>
+              Strike {strikeWarning.count} / 3
             </p>
             <button
               className="btn btn-primary"
-              onClick={() => setShowWarning(false)}
+              type="button"
+              onClick={async () => {
+                await returnToExamMode();
+                setShowStrikeWarning(false);
+              }}
             >
-              I Understand
+              OK - return to exam mode
             </button>
           </div>
         </div>
@@ -546,8 +552,8 @@ export default function ExamPage() {
               <span className="exam-progress-pill">
                 {answeredCount} / {exam.questions.length} answered
               </span>
-              <span className="badge" style={{ marginLeft: '0.5rem', background: strikes > 0 ? '#e74c3c' : 'var(--success)' }}>
-                STRIKES: {strikes}/3
+              <span className="badge" style={{ marginLeft: '0.5rem', background: visibleStrikes > 0 ? '#e74c3c' : 'var(--success)' }}>
+                STRIKES: {visibleStrikes}/3
               </span>
             </div>
 
@@ -572,16 +578,6 @@ export default function ExamPage() {
             </span>
           </div>
 
-          {notifications.length > 0 && (
-            <div className="exam-toast-stack">
-              {notifications.slice(0, 3).map((msg, i) => (
-                <div key={`${msg}-${i}`} className="exam-toast">
-                  <span className="exam-toast-icon">!</span>
-                  <span>{msg}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </>
       )}
 
@@ -692,7 +688,7 @@ export default function ExamPage() {
 
         {isExam && error && <div className="alert alert-error">{error}</div>}
 
-        <div className={isExam ? 'grid-2' : undefined} style={!isExam ? { marginTop: '1.5rem' } : undefined}>
+        <div style={!isExam ? { marginTop: '1.5rem' } : undefined}>
           <div>
             {isExam ? (
               <>
@@ -788,7 +784,12 @@ export default function ExamPage() {
                   />
                 </div>
 
-                {exam.rules && <p className="exam-rules">{exam.rules}</p>}
+                {exam.rules && (
+                  <section className="exam-rules-card">
+                    <h2>Exam rules</h2>
+                    <div className="exam-rules-content">{exam.rules}</div>
+                  </section>
+                )}
               </>
             ) : null}
           </div>
