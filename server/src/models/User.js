@@ -8,6 +8,10 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, minlength: 6 },
     role: { type: String, enum: ['student', 'admin'], default: 'student' },
     studentId: { type: String, trim: true },
+    college: { type: String, trim: true, default: '' },
+    faculty: { type: String, trim: true, default: '' },
+    department: { type: String, trim: true, default: '' },
+    level: { type: Number, enum: [100, 200, 300, 400, 500, 600] },
   },
   { timestamps: true }
 );

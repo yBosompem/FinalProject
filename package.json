@@ -2,11 +2,14 @@
   "name": "secure-exam-monitor",
   "version": "1.0.0",
   "private": true,
+  "main": "main.js",
   "description": "AI-assisted secure online examination monitoring system",
   "scripts": {
     "install:all": "npm install --prefix server && npm install --prefix client",
     "server": "npm run dev --prefix server",
     "client": "npm run dev --prefix client",
+    "build:client": "npm run build --prefix client",
+    "desktop": "npm run build:client && electron .",
     "seed": "npm run seed --prefix server",
     "ai": "cd ai-service && python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000",
     "ai:train": "cd ai-service && python train.py",
@@ -16,6 +19,11 @@
     "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow-models/face-landmarks-detection": "^1.0.6",
     "@tensorflow-models/mobilenet": "^2.1.1",
-    "face-api.js": "^0.20.0"
+    "face-api.js": "^0.20.0",
+    "mongodb": "^7.3.0",
+    "mongoose": "^9.7.0"
+  },
+  "devDependencies": {
+    "electron": "^42.5.0"
   }
 }

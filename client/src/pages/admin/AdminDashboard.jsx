@@ -119,8 +119,17 @@ export default function AdminDashboard() {
                       className="btn btn-primary"
                       style={{ padding: '0.35rem 0.75rem', fontSize: '0.85rem' }}
                     >
-                      Students
+                      Results
                     </Link>
+                    {!exam.isPublished && (
+                      <Link
+                        to={`/admin/exam/${exam._id}/edit`}
+                        className="btn btn-ghost"
+                        style={{ padding: '0.35rem 0.75rem', fontSize: '0.85rem' }}
+                      >
+                        Edit
+                      </Link>
+                    )}
                     <button
                       type="button"
                       className="btn btn-ghost"

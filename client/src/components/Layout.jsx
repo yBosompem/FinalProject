@@ -19,7 +19,13 @@ export default function Layout({ children, nav }) {
         </Link>
         <nav className="nav-links">
           {nav}
-          <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>{user?.name}</span>
+          <Link
+            to="/profile"
+            style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}
+            title="View profile"
+          >
+            {user?.name}
+          </Link>
           <ThemeToggle />
           <button type="button" className="btn btn-ghost" onClick={handleLogout}>
             Logout

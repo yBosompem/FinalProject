@@ -7,17 +7,82 @@ const router = express.Router();
 
 router.use(authenticate);
 
+function studentTargetFilter(user) {
+  return {
+    isPublished: true,
+    targetCollege: user.college || '__no_college__',
+    targetFaculty: user.faculty || '__no_faculty__',
+    targetDepartment: user.department || '__no_department__',
+    targetLevel: Number(user.level) || -1,
+  };
+}
+
+function examMatchesStudent(exam, user) {
+  return (
+    exam.targetCollege === user.college &&
+    exam.targetFaculty === user.faculty &&
+    exam.targetDepartment === user.department &&
+    Number(exam.targetLevel) === Number(user.level)
+  );
+}
+
+function normalizeTargeting(body) {
+  return {
+    targetCollege: body.targetCollege || '',
+    targetFaculty: body.targetFaculty || '',
+    targetDepartment: body.targetDepartment || '',
+    targetLevel: body.targetLevel ? Number(body.targetLevel) : null,
+  };
+}
+
+function validateTargeting(body) {
+  const target = normalizeTargeting(body);
+  if (!target.targetCollege || !target.targetFaculty || !target.targetDepartment || !target.targetLevel) {
+    return {
+      error: 'Choose a target college, faculty, department, and level before publishing this exam.',
+    };
+  }
+  return { target };
+}
+
+function normalizeQuestions(questions) {
+  return (questions || []).map((q, i) => {
+    const type = q.type || (q.options?.length >= 2 ? 'mcq' : 'short');
+    const marks = Number(q.marks);
+    return {
+      ...q,
+      questionNumber: q.questionNumber ?? i + 1,
+      type,
+      options: type === 'short' ? [] : q.options || [],
+      correctIndex:
+        q.correctIndex === '' || q.correctIndex == null ? null : Number(q.correctIndex),
+      correctAnswer: q.correctAnswer || '',
+      marks: Number.isFinite(marks) && marks >= 0 ? marks : 1,
+    };
+  });
+}
+
 router.get('/', async (req, res) => {
   try {
     let filter;
     if (req.user.role === 'admin') {
       filter = { createdBy: req.user._id };
     } else {
-      filter = { isPublished: true };
+      filter = studentTargetFilter(req.user);
     }
     const exams = await Exam.find(filter)
       .populate('createdBy', 'name email')
       .sort({ createdAt: -1 });
+    if (req.user.role === 'student') {
+      return res.json(
+        exams.map((exam) => {
+          const obj = exam.toObject();
+          obj.questionCount = obj.questions?.length || 0;
+          delete obj.questions;
+          return obj;
+        })
+      );
+    }
     res.json(exams);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -33,7 +98,7 @@ router.get('/:id', async (req, res) => {
       if (exam.createdBy._id.toString() !== req.user._id.toString()) {
         return res.status(403).json({ message: 'You can only access exams you created' });
       }
-    } else if (!exam.isPublished) {
+    } else if (!exam.isPublished || !examMatchesStudent(exam, req.user)) {
       return res.status(403).json({ message: 'Exam not available' });
     }
 
@@ -63,13 +128,13 @@ router.post('/', requireRole('admin'), async (req, res) => {
       isPublished,
       showResultsToStudents,
       maxGradePoints,
+      availableFrom,
+      availableUntil,
     } = req.body;
 
-    const normalizedQuestions = (questions || []).map((q, i) => ({
-      ...q,
-      questionNumber: q.questionNumber ?? i + 1,
-      type: q.type || (q.options?.length >= 2 ? 'mcq' : 'short'),
-    }));
+    const normalizedQuestions = normalizeQuestions(questions);
+    const { target, error: targetError } = validateTargeting(req.body);
+    if (targetError) return res.status(400).json({ message: targetError });
 
     const exam = await Exam.create({
       title,
@@ -80,6 +145,9 @@ router.post('/', requireRole('admin'), async (req, res) => {
       maxGradePoints: maxGradePoints ?? 100,
       isPublished: Boolean(isPublished),
       showResultsToStudents: Boolean(showResultsToStudents),
+      availableFrom: availableFrom || undefined,
+      availableUntil: availableUntil || undefined,
+      ...target,
       createdBy: req.user._id,
     });
     res.status(201).json(exam);
@@ -93,7 +161,19 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     const owned = await assertAdminOwnsExam(req.user._id, req.params.id);
     if (!owned) return res.status(403).json({ message: 'You can only edit exams you created' });
 
-    const { createdBy, ...updates } = req.body;
+    const { createdBy, targetLevel, ...rest } = req.body;
+    const updates = {
+      ...rest,
+      ...(Array.isArray(req.body.questions) ? { questions: normalizeQuestions(req.body.questions) } : {}),
+      ...(Object.prototype.hasOwnProperty.call(req.body, 'targetLevel')
+        ? { targetLevel: targetLevel ? Number(targetLevel) : null }
+        : {}),
+    };
+    if (updates.isPublished) {
+      const merged = { ...owned.toObject(), ...updates };
+      const { error: targetError } = validateTargeting(merged);
+      if (targetError) return res.status(400).json({ message: targetError });
+    }
     const exam = await Exam.findByIdAndUpdate(req.params.id, updates, {
       new: true,
       runValidators: true,

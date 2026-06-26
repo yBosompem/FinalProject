@@ -56,6 +56,9 @@ function RiskRing({ score }) {
 }
 
 async function requestEntireScreen() {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    throw new Error('Screen capture is not available. In the desktop app, restart after the Electron update is applied.');
+  }
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: { cursor: 'always' },
     audio: false,
@@ -73,7 +76,16 @@ async function requestEntireScreen() {
 }
 
 const ProctoringMonitor = forwardRef(function ProctoringMonitor(
-  { sessionId, active, onRiskUpdate, onScreenShareLost, onFocusViolation, onReadyChange },
+  {
+    sessionId,
+    active,
+    setupMode = 'all',
+    onRiskUpdate,
+    onScreenShareLost,
+    onFocusViolation,
+    onReadyChange,
+    onStatusChange,
+  },
   ref
 ) {
   const webcamRef = useRef(null);
@@ -120,6 +132,9 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     webcamStreamRef.current = null;
     screenStreamRef.current = null;
     screenTrackRef.current = null;
+    setWebcamStatus('pending');
+    setScreenStatus('pending');
+    setRecordingStatus('off');
   }, [stopRecordingInternal]);
 
   const uploadRecording = useCallback(() => {
@@ -321,6 +336,9 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
   }, [active, reportEvent, onScreenShareLost]);
 
   const setupWebcam = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Webcam or microphone access is not available in this environment.');
+    }
     setWebcamStatus('requesting');
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: 640, height: 480 },
@@ -335,17 +353,53 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     startVoiceMonitor(stream);
   }, [startVoiceMonitor]);
 
+  const startWebcamOnly = useCallback(async () => {
+    try {
+      await setupWebcam();
+      setLastAlert(null);
+    } catch (err) {
+      setWebcamStatus('stopped');
+      throw err;
+    }
+  }, [setupWebcam]);
+
+  const startScreenOnly = useCallback(async () => {
+    try {
+      await setupScreenShare();
+      setLastAlert(null);
+    } catch (err) {
+      setScreenStatus('stopped');
+      throw err;
+    }
+  }, [setupScreenShare]);
+
   const setupProctoring = useCallback(async () => {
-    await setupWebcam();
-    await setupScreenShare();
-  }, [setupWebcam, setupScreenShare]);
+    try {
+      await setupWebcam();
+      await setupScreenShare();
+      setLastAlert(null);
+    } catch (err) {
+      if (webcamStatus !== 'active') setWebcamStatus('stopped');
+      if (screenStatus !== 'active') setScreenStatus('stopped');
+      throw err;
+    }
+  }, [setupWebcam, setupScreenShare, screenStatus, webcamStatus]);
 
   useEffect(() => {
     onReadyChange?.(webcamStatus === 'active' && screenStatus === 'active');
-  }, [webcamStatus, screenStatus, onReadyChange]);
+    onStatusChange?.({
+      webcamReady: webcamStatus === 'active',
+      screenReady: screenStatus === 'active',
+      proctoringReady: webcamStatus === 'active' && screenStatus === 'active',
+    });
+  }, [webcamStatus, screenStatus, onReadyChange, onStatusChange]);
 
   useEffect(() => {
     if (!active || !sessionId || webcamStatus !== 'active') return undefined;
+
+    if (!audioContextRef.current && webcamStreamRef.current) {
+      startVoiceMonitor(webcamStreamRef.current);
+    }
 
     if (recordingStatus === 'off' && screenStatus === 'active') {
       startCompositeRecording();
@@ -362,6 +416,7 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     captureAndAnalyze,
     recordingStatus,
     startCompositeRecording,
+    startVoiceMonitor,
   ]);
 
   useEffect(() => () => stopAll(), [stopAll]);
@@ -400,6 +455,30 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     screenStatus === 'active' ? 'active' : screenStatus === 'stopped' ? 'stopped' : 'pending';
   const camDotStatus =
     webcamStatus === 'active' ? 'active' : webcamStatus === 'requesting' ? 'pending' : 'off';
+  const setupAction =
+    setupMode === 'webcam'
+      ? startWebcamOnly
+      : setupMode === 'screen'
+        ? startScreenOnly
+        : setupProctoring;
+  const setupLabel =
+    setupMode === 'webcam'
+      ? webcamStatus === 'active'
+        ? 'Webcam enabled'
+        : 'Enable webcam and microphone'
+      : setupMode === 'screen'
+        ? screenStatus === 'active'
+          ? 'Screen sharing enabled'
+          : 'Share entire screen'
+        : 'Enable proctoring';
+  const setupDescription =
+    setupMode === 'webcam'
+      ? 'Enable your webcam and microphone. Keep your face clearly visible before continuing.'
+      : setupMode === 'screen'
+        ? 'Share your entire screen only. Window or tab sharing is not accepted for the exam.'
+        : 'Enable entire screen, webcam, and microphone. Your session is recorded for instructor review.';
+  const showScreenFeed = setupMode !== 'webcam' || active;
+  const showWebcamFeed = setupMode !== 'screen' || active;
 
   return (
     <div className="proctor-panel glass-card">
@@ -417,17 +496,18 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
 
       {!active && (
         <div className="proctor-setup">
-          <p>
-            Enable <strong>entire screen</strong>, <strong>webcam</strong>, and{' '}
-            <strong>microphone</strong>. Your session is recorded for instructor review.
-          </p>
+          <p>{setupDescription}</p>
           <button
             type="button"
             className="btn btn-primary"
             style={{ width: '100%' }}
-            onClick={() => setupProctoring().catch((e) => setLastAlert({ message: e.message }))}
+            onClick={() => setupAction().catch((e) => setLastAlert({ message: e.message }))}
+            disabled={
+              (setupMode === 'webcam' && webcamStatus === 'active') ||
+              (setupMode === 'screen' && screenStatus === 'active')
+            }
           >
-            Enable proctoring
+            {setupLabel}
           </button>
         </div>
       )}
@@ -451,29 +531,29 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
         </div>
       </div>
 
-      <div>
-        <p className="proctor-feed-label">
-          Screen capture
-          {screenStatus === 'active' && <span className="badge badge-success">Live</span>}
-        </p>
-        <div className="proctor-video-wrap proctor-video-wrap--screen">
-          <video ref={screenRef} muted playsInline />
-          {active && screenStatus === 'active' && (
-            <span className="proctor-feed-badge badge badge-live">LIVE</span>
-          )}
-          <canvas ref={screenCanvasRef} style={{ display: 'none' }} />
-        </div>
+      <div style={!showScreenFeed ? { display: 'none' } : undefined}>
+          <p className="proctor-feed-label">
+            Screen capture
+            {screenStatus === 'active' && <span className="badge badge-success">Live</span>}
+          </p>
+          <div className="proctor-video-wrap proctor-video-wrap--screen">
+            <video ref={screenRef} muted playsInline />
+            {active && screenStatus === 'active' && (
+              <span className="proctor-feed-badge badge badge-live">LIVE</span>
+            )}
+            <canvas ref={screenCanvasRef} style={{ display: 'none' }} />
+          </div>
       </div>
 
-      <div>
-        <p className="proctor-feed-label">
-          Identity feed
-          {webcamStatus === 'active' && <span className="badge badge-success">Live</span>}
-        </p>
-        <div className="proctor-video-wrap proctor-video-wrap--cam">
-          <video ref={webcamRef} muted playsInline />
-          <canvas ref={canvasRef} style={{ display: 'none' }} />
-        </div>
+      <div style={!showWebcamFeed ? { display: 'none' } : undefined}>
+          <p className="proctor-feed-label">
+            Identity feed
+            {webcamStatus === 'active' && <span className="badge badge-success">Live</span>}
+          </p>
+          <div className="proctor-video-wrap proctor-video-wrap--cam">
+            <video ref={webcamRef} muted playsInline />
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+          </div>
       </div>
 
       {active && (

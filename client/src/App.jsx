@@ -10,6 +10,7 @@ import ActiveSessions from './pages/admin/ActiveSessions';
 import FlaggedSessions from './pages/admin/FlaggedSessions';
 import SessionReport from './pages/admin/SessionReport';
 import ExamStudents from './pages/admin/ExamStudents';
+import Profile from './pages/Profile';
 import { useAuth } from './context/AuthContext';
 
 function HomeRedirect() {
@@ -42,6 +43,14 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <Profile />
+          </ProtectedRoute>
+        }
+      />
 
       <Route
         path="/admin"
@@ -53,6 +62,14 @@ export default function App() {
       />
       <Route
         path="/admin/create-exam"
+        element={
+          <ProtectedRoute role="admin">
+            <CreateExam />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/exam/:examId/edit"
         element={
           <ProtectedRoute role="admin">
             <CreateExam />

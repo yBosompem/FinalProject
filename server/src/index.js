@@ -1,3 +1,7 @@
+const dns = require('dns');
+dns.setServers(['8.8.8.8', '8.8.4.4']);
+dns.setDefaultResultOrder('ipv4first');
+
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -25,6 +29,17 @@ app.use('/api/exams', examRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 
+const path = require('path');
+
+app.use(express.static(path.join(__dirname, '../../client/dist')));
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  res.sendFile(path.join(__dirname, '../../client/dist/index.html'));
+});
+
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(500).json({ message: 'Internal server error' });
@@ -40,3 +55,5 @@ mongoose
     console.error('MongoDB connection failed:', err.message);
     process.exit(1);
   });
+
+  

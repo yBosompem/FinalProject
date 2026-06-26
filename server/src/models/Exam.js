@@ -5,7 +5,7 @@ const questionSchema = new mongoose.Schema({
   text: { type: String, required: true },
   type: { type: String, enum: ['mcq', 'short'], default: 'mcq' },
   options: [{ type: String }],
-  correctIndex: { type: Number, min: 0, default: 0 },
+  correctIndex: { type: Number, min: 0, default: null },
   correctAnswer: { type: String, default: '' },
   marks: { type: Number, min: 0, default: 1 },
 });
@@ -23,6 +23,10 @@ const examSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     availableFrom: { type: Date },
     availableUntil: { type: Date },
+    targetCollege: { type: String, trim: true, default: '' },
+    targetFaculty: { type: String, trim: true, default: '' },
+    targetDepartment: { type: String, trim: true, default: '' },
+    targetLevel: { type: Number, enum: [100, 200, 300, 400, 500, 600, null], default: null },
   },
   { timestamps: true }
 );

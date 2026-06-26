@@ -148,9 +148,6 @@ export default function Login() {
         <p style={{ marginTop: '1.5rem', fontSize: '0.9rem', color: 'var(--muted)' }}>
           No account? <Link to="/register">Register now</Link>
         </p>
-        <p style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--muted)' }}>
-          Demo: admin@university.edu / admin123 · student@university.edu / student123
-        </p>
       </div>
 
       <style>{`
@@ -168,3 +165,4 @@ export default function Login() {
     </div>
   );
 }
+

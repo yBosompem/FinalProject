@@ -53,6 +53,9 @@ export default function ExamPage() {
   const [totalDuration, setTotalDuration] = useState(0);
   const [notifications, setNotifications] = useState([]);
   const [proctoringReady, setProctoringReady] = useState(false);
+  const [webcamReady, setWebcamReady] = useState(false);
+  const [screenReady, setScreenReady] = useState(false);
+  const [rulesAccepted, setRulesAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const submitLockRef = useRef(false);
@@ -65,10 +68,6 @@ export default function ExamPage() {
     try {
       if (window.screen?.isExtended || window.screen?.width > 4096) {
         return false;
-      }
-      if (navigator.getDisplayMedia) {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        stream.getTracks().forEach(track => track.stop());
       }
     } catch (e) {
       console.log('Display check failed (expected in some browsers)', e);
@@ -99,9 +98,15 @@ export default function ExamPage() {
       submitLockRef.current = true;
       setSubmitting(true);
       try {
-        await proctoringRef.current?.uploadRecording?.();
-        endSession();
         const result = await api.submitSession(session._id, { answers, autoSubmit });
+        const recordingUpload = proctoringRef.current?.uploadRecording?.();
+        endSession();
+        if (window.electronAPI) {
+          window.electronAPI.exitExamMode();
+        }
+        recordingUpload?.catch((recordingErr) => {
+          console.warn('Recording upload failed after final submission:', recordingErr.message);
+        });
         navigate('/student', {
           replace: true,
           state: {
@@ -145,7 +150,7 @@ export default function ExamPage() {
           setTotalDuration(left);
         }
 
-        setPhase('precheck');
+        setPhase('precheck-camera');
       } catch (err) {
         setError(err.message);
         setPhase('blocked');
@@ -155,8 +160,12 @@ export default function ExamPage() {
   }, [examId]);
 
   const beginExam = async () => {
+    if (!rulesAccepted) {
+      setError('Read and accept the exam rules before starting.');
+      return;
+    }
     if (!proctoringReady) {
-      setError('Enable entire-screen sharing and webcam before starting.');
+      setError('Enable webcam, microphone, and entire-screen sharing before starting.');
       return;
     }
     const displaySecure = await checkDisplaySecurity();
@@ -182,6 +191,10 @@ export default function ExamPage() {
       setPhase('exam');
       setError('');
 
+      if (window.electronAPI) {
+        window.electronAPI.enterExamMode();
+      }
+
       await api.postMonitoringEvent(sess._id, {
         type: 'screen_share_started',
         message: 'Entire screen sharing active for exam',
@@ -190,6 +203,25 @@ export default function ExamPage() {
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const goToScreenShare = () => {
+    if (!webcamReady) {
+      setError('Enable your webcam and microphone before continuing.');
+      return;
+    }
+    setError('');
+    setPhase('precheck-screen');
+  };
+
+  const goToRules = () => {
+    if (!screenReady) {
+      setError('Share your entire screen before continuing.');
+      return;
+    }
+    setError('');
+    setRulesAccepted(false);
+    setPhase('precheck-rules');
   };
 
   const handleStrike = async (reason) => {
@@ -208,6 +240,14 @@ export default function ExamPage() {
       submitExam(true);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (window.electronAPI) {
+        window.electronAPI.exitExamMode();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (phase !== 'exam' || !session) return;
@@ -229,6 +269,23 @@ export default function ExamPage() {
     }, 15000);
     return () => clearInterval(saveTimer);
   }, [phase, session, answers]);
+
+  useEffect(() => {
+    if (phase !== 'exam' || !session || !window.electronAPI?.onExternalDeviceConnected) {
+      return undefined;
+    }
+
+    return window.electronAPI.onExternalDeviceConnected((device) => {
+      const message = `External device connected during exam: ${device.name || 'unknown device'}`;
+      setNotifications((prev) => [message, ...prev].slice(0, 5));
+      api.postMonitoringEvent(session._id, {
+        type: 'external_device_connected',
+        message,
+        severity: device.deviceClass === 'DiskDrive' || device.deviceClass === 'WPD' ? 'high' : 'medium',
+        metadata: device,
+      }).catch(() => {});
+    });
+  }, [phase, session]);
 
   useEffect(() => {
     if (phase !== 'exam') return undefined;
@@ -350,6 +407,12 @@ export default function ExamPage() {
     setNotifications((prev) => [message, ...prev].slice(0, 5));
   };
 
+  const handleProctoringStatus = useCallback((status) => {
+    setWebcamReady(status.webcamReady);
+    setScreenReady(status.screenReady);
+    setProctoringReady(status.proctoringReady);
+  }, []);
+
   if (phase === 'loading') {
     return (
       <div className="loading-screen">
@@ -375,6 +438,10 @@ export default function ExamPage() {
   }
 
   const isExam = phase === 'exam';
+  const isCameraCheck = phase === 'precheck-camera';
+  const isScreenCheck = phase === 'precheck-screen';
+  const isRulesCheck = phase === 'precheck-rules';
+  const setupMode = isCameraCheck ? 'webcam' : isScreenCheck ? 'screen' : 'all';
   const question = isExam ? exam.questions[currentQ] : null;
   const urgent = remaining < 60000;
   const timePct = totalDuration > 0 ? Math.max(0, (remaining / totalDuration) * 100) : 0;
@@ -500,6 +567,9 @@ export default function ExamPage() {
             <span className="exam-security-chip">
               <ShieldIcon /> AI monitoring on
             </span>
+            <span className="exam-security-chip">
+              <ShieldIcon /> External device watch
+            </span>
           </div>
 
           {notifications.length > 0 && (
@@ -516,45 +586,95 @@ export default function ExamPage() {
       )}
 
       <div className={isExam ? 'exam-body' : 'container'} style={isExam ? undefined : { paddingTop: '2rem', maxWidth: 720 }}>
-        {!isExam && (
-          <div className="precheck-hero">
-            <h1>{exam.title}</h1>
-            <p>
-              Complete the system check below. Your entire screen, webcam, and microphone are required
-              before you can begin.
-            </p>
+        {(isCameraCheck || isScreenCheck || isRulesCheck || isExam) && (
+          <div style={isRulesCheck || isExam ? { display: 'none' } : undefined}>
+            {(isCameraCheck || isScreenCheck) && (
+              <div className="precheck-hero">
+                <h1>{exam.title}</h1>
+                <p>
+                  {isCameraCheck
+                    ? 'Step 1: enable your webcam and microphone. Keep your face clearly visible before continuing.'
+                    : 'Step 2: share your entire screen. Do not choose a browser tab or a single window.'}
+                </p>
+              </div>
+            )}
+            <ProctoringMonitor
+              ref={proctoringRef}
+              sessionId={session?._id}
+              active={isExam}
+              setupMode={setupMode}
+              onRiskUpdate={handleRiskUpdate}
+              onScreenShareLost={handleScreenShareLost}
+              onFocusViolation={handleFocusViolation}
+              onReadyChange={setProctoringReady}
+              onStatusChange={handleProctoringStatus}
+            />
+            {(isCameraCheck || isScreenCheck) && (
+              <>
+                {error && <div className="alert alert-error" style={{ marginTop: '1rem' }}>{error}</div>}
+                <div className="precheck-actions" style={{ marginTop: '1rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={isCameraCheck ? !webcamReady : !screenReady}
+                    onClick={isCameraCheck ? goToScreenShare : goToRules}
+                  >
+                    Next
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      if (isScreenCheck) {
+                        setPhase('precheck-camera');
+                        return;
+                      }
+                      endSession();
+                      navigate('/student');
+                    }}
+                  >
+                    {isScreenCheck ? 'Back' : 'Cancel'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
-            <div className="precheck-steps">
-              <div className={`precheck-step${proctoringReady ? ' precheck-step--done' : ''}`}>
-                <span className="precheck-step-num">{proctoringReady ? '✓' : '1'}</span>
-                <div className="precheck-step-text">
-                  <strong>Enable proctoring</strong>
-                  <span>Share entire screen, webcam, and microphone</span>
-                </div>
-              </div>
-              <div className="precheck-step">
-                <span className="precheck-step-num">2</span>
-                <div className="precheck-step-text">
-                  <strong>Review exam rules</strong>
-                  <span>{exam.rules || 'Follow all instructions from your instructor.'}</span>
-                </div>
-              </div>
-              <div className="precheck-step">
-                <span className="precheck-step-num">3</span>
-                <div className="precheck-step-text">
-                  <strong>Begin when ready</strong>
-                  <span>The timer starts immediately once you begin</span>
-                </div>
+        {isRulesCheck && (
+          <div>
+            <div className="precheck-hero">
+              <h1>{exam.title}</h1>
+              <p>{exam.description || 'Review the exam rules carefully before starting.'}</p>
+            </div>
+
+            <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.1rem', marginBottom: '0.75rem' }}>Exam rules</h2>
+              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                {exam.rules || 'Follow all instructions from your instructor.'}
               </div>
             </div>
 
-            {error && <div className="alert alert-error">{error}</div>}
+            <label style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start', marginBottom: '1rem' }}>
+              <input
+                type="checkbox"
+                checked={rulesAccepted}
+                onChange={(e) => {
+                  setRulesAccepted(e.target.checked);
+                  if (e.target.checked) setError('');
+                }}
+                style={{ marginTop: '0.2rem' }}
+              />
+              <span>I have read and accepted the exam rules.</span>
+            </label>
+
+            {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
 
             <div className="precheck-actions">
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!proctoringReady}
+                disabled={!rulesAccepted || !proctoringReady}
                 onClick={beginExam}
               >
                 Begin exam
@@ -562,12 +682,9 @@ export default function ExamPage() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => {
-                  endSession();
-                  navigate('/student');
-                }}
+                onClick={() => setPhase('precheck-screen')}
               >
-                Cancel
+                Back
               </button>
             </div>
           </div>
@@ -676,15 +793,6 @@ export default function ExamPage() {
             ) : null}
           </div>
 
-          <ProctoringMonitor
-            ref={proctoringRef}
-            sessionId={session?._id}
-            active={isExam}
-            onRiskUpdate={handleRiskUpdate}
-            onScreenShareLost={handleScreenShareLost}
-            onFocusViolation={handleFocusViolation}
-            onReadyChange={setProctoringReady}
-          />
         </div>
       </div>
     </div>

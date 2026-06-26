@@ -12,6 +12,34 @@ const COMPLETED_STATUSES = ['submitted', 'expired'];
 
 router.use(authenticate);
 
+function markExpiredForList(session) {
+  if (session?.status === 'in_progress' && new Date() > session.endsAt) {
+    session.status = 'expired';
+    session.submittedAt = session.submittedAt || session.endsAt;
+  }
+  return session;
+}
+
+async function finalizeIfExpired(session) {
+  if (session?.status === 'in_progress' && new Date() > session.endsAt) {
+    return finalizeSession(session._id, {
+      answers: session.answers,
+      status: 'expired',
+      autoSubmit: true,
+    });
+  }
+  return session;
+}
+
+function examMatchesStudent(exam, user) {
+  return (
+    exam.targetCollege === user.college &&
+    exam.targetFaculty === user.faculty &&
+    exam.targetDepartment === user.department &&
+    Number(exam.targetLevel) === Number(user.level)
+  );
+}
+
 router.get('/', async (req, res) => {
   try {
     let filter;
@@ -24,12 +52,13 @@ router.get('/', async (req, res) => {
     const examFields = 'title durationMinutes showResultsToStudents';
     const sessions = await ExamSession.find(filter)
       .populate('exam', examFields)
-      .populate('student', 'name email studentId')
+      .populate('student', 'name email studentId college faculty department level')
       .sort({ createdAt: -1 });
 
     if (req.user.role === 'student') {
       return res.json(
         sessions.map((s) => {
+          markExpiredForList(s);
           const obj = s.toObject();
           delete obj.scaledScore;
           delete obj.maxGradePoints;
@@ -39,6 +68,10 @@ router.get('/', async (req, res) => {
           delete obj.alertCount;
           delete obj.isFlagged;
           delete obj.answers;
+          if (!s.exam?.showResultsToStudents) {
+            delete obj.correctCount;
+            delete obj.totalQuestions;
+          }
           return obj;
         })
       );
@@ -57,7 +90,7 @@ router.get('/active', requireRole('admin'), async (req, res) => {
       exam: { $in: examIds },
     })
       .populate('exam', 'title')
-      .populate('student', 'name email studentId')
+      .populate('student', 'name email studentId college faculty department level')
       .sort({ startedAt: -1 });
     res.json(sessions);
   } catch (err) {
@@ -71,7 +104,7 @@ router.get('/by-exam/:examId', requireRole('admin'), async (req, res) => {
     if (!exam) return res.status(403).json({ message: 'You can only view your own exams' });
 
     const sessions = await ExamSession.find({ exam: exam._id })
-      .populate('student', 'name email studentId')
+      .populate('student', 'name email studentId college faculty department level')
       .sort({ submittedAt: -1, createdAt: -1 });
 
     res.json({
@@ -91,7 +124,7 @@ router.get('/by-exam/:examId', requireRole('admin'), async (req, res) => {
 router.get('/exam/:examId/status', requireRole('student'), async (req, res) => {
   try {
     const exam = await Exam.findById(req.params.examId);
-    if (!exam || !exam.isPublished) {
+    if (!exam || !exam.isPublished || !examMatchesStudent(exam, req.user)) {
       return res.status(404).json({ message: 'Exam not available' });
     }
 
@@ -104,14 +137,15 @@ router.get('/exam/:examId/status', requireRole('student'), async (req, res) => {
       return res.json({ canStart: true, canResume: false, session: null });
     }
 
-    if (session.status === 'in_progress') {
-      return res.json({ canStart: true, canResume: true, session });
+    const currentSession = await finalizeIfExpired(session);
+    if (currentSession.status === 'in_progress') {
+      return res.json({ canStart: true, canResume: true, session: currentSession });
     }
 
     return res.json({
       canStart: false,
       canResume: false,
-      session,
+      session: currentSession,
       message: 'You have already completed this exam and cannot access it again.',
     });
   } catch (err) {
@@ -123,7 +157,7 @@ router.get('/:id', async (req, res) => {
   try {
     const session = await ExamSession.findById(req.params.id)
       .populate('exam')
-      .populate('student', 'name email studentId');
+      .populate('student', 'name email studentId college faculty department level');
     if (!session) return res.status(404).json({ message: 'Session not found' });
 
     if (req.user.role === 'student') {
@@ -148,7 +182,7 @@ router.get('/:id', async (req, res) => {
 router.post('/start/:examId', requireRole('student'), async (req, res) => {
   try {
     const exam = await Exam.findById(req.params.examId);
-    if (!exam || !exam.isPublished) {
+    if (!exam || !exam.isPublished || !examMatchesStudent(exam, req.user)) {
       return res.status(404).json({ message: 'Exam not available' });
     }
 
@@ -169,7 +203,13 @@ router.post('/start/:examId', requireRole('student'), async (req, res) => {
       status: 'in_progress',
     });
     if (existing) {
-      return res.json(existing);
+      const currentSession = await finalizeIfExpired(existing);
+      if (currentSession.status !== 'in_progress') {
+        return res.status(403).json({
+          message: 'This exam attempt has ended and cannot be resumed.',
+        });
+      }
+      return res.json(currentSession);
     }
 
     const endsAt = new Date(Date.now() + exam.durationMinutes * 60 * 1000);
@@ -252,8 +292,24 @@ router.post('/:id/submit', requireRole('student'), async (req, res) => {
       autoSubmit: Boolean(autoSubmit),
     });
 
+    let sessionObj = finalized.toObject();
+    if (req.user.role === 'student') {
+      delete sessionObj.scaledScore;
+      delete sessionObj.maxGradePoints;
+      delete sessionObj.examScore;
+      delete sessionObj.riskScore;
+      delete sessionObj.questionBreakdown;
+      delete sessionObj.alertCount;
+      delete sessionObj.isFlagged;
+      delete sessionObj.answers;
+      if (!finalized.exam?.showResultsToStudents) {
+        delete sessionObj.correctCount;
+        delete sessionObj.totalQuestions;
+      }
+    }
+
     res.json({
-      session: finalized,
+      session: sessionObj,
       message: autoSubmit
         ? 'Exam auto-submitted. Monitoring report sent to your instructor.'
         : 'Exam submitted. Monitoring report sent to your instructor.',
@@ -267,7 +323,7 @@ router.get('/:id/results', requireRole('student'), async (req, res) => {
   try {
     const session = await ExamSession.findById(req.params.id)
       .populate('exam', 'title showResultsToStudents')
-      .populate('student', 'name email');
+      .populate('student', 'name email college faculty department level');
 
     const studentId = session.student._id?.toString() || session.student.toString();
     if (!session || studentId !== req.user._id.toString()) {
@@ -294,18 +350,14 @@ router.get('/:id/results', requireRole('student'), async (req, res) => {
   }
 });
 
-router.get('/:id/report', async (req, res) => {
+router.get('/:id/report', requireRole('admin'), async (req, res) => {
   try {
     const session = await ExamSession.findById(req.params.id)
       .populate('exam', 'title durationMinutes createdBy maxGradePoints')
-      .populate('student', 'name email studentId');
+      .populate('student', 'name email studentId college faculty department level');
     if (!session) return res.status(404).json({ message: 'Session not found' });
 
-    if (req.user.role === 'student') {
-      if (session.student._id.toString() !== req.user._id.toString()) {
-        return res.status(403).json({ message: 'Access denied' });
-      }
-    } else if (!(await assertAdminOwnsSession(req.user._id, session))) {
+    if (!(await assertAdminOwnsSession(req.user._id, session))) {
       return res.status(403).json({ message: 'Access denied' });
     }
 

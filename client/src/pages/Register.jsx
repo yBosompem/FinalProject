@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ThemeToggle from '../components/ThemeToggle';
+import { ACADEMIC_DATA, LEVELS, getDepartments, getFaculties } from '../utils/academicData';
 
 const getGreeting = () => {
   const hour = new Date().getHours();
@@ -10,14 +11,11 @@ const getGreeting = () => {
   return 'Good evening!';
 };
 
-const checkPasswordStrength = (password) => {
-  const requirements = [
-    { label: 'At least 6 characters', pass: password.length >= 6 },
-    { label: 'Contains a number', pass: /\d/.test(password) },
-    { label: 'Contains uppercase and lowercase', pass: /[A-Z]/.test(password) && /[a-z]/.test(password) },
-  ];
-  return requirements;
-};
+const checkPasswordStrength = (password) => [
+  { label: 'At least 6 characters', pass: password.length >= 6 },
+  { label: 'Contains a number', pass: /\d/.test(password) },
+  { label: 'Contains uppercase and lowercase', pass: /[A-Z]/.test(password) && /[a-z]/.test(password) },
+];
 
 export default function Register() {
   const { register } = useAuth();
@@ -28,6 +26,10 @@ export default function Register() {
     password: '',
     role: 'student',
     studentId: '',
+    college: '',
+    faculty: '',
+    department: '',
+    level: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -43,13 +45,16 @@ export default function Register() {
     setPasswordRequirements(checkPasswordStrength(form.password));
   }, [form.password]);
 
+  const faculties = getFaculties(form.college);
+  const departments = getDepartments(form.college, form.faculty);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      const u = await register(form);
-      navigate(u.role === 'admin' ? '/admin' : '/student');
+      const user = await register(form);
+      navigate(user.role === 'admin' ? '/admin' : '/student');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -68,6 +73,7 @@ export default function Register() {
         </div>
         <p className="page-sub">Create your account</p>
         {error && <div className="alert alert-error">{error}</div>}
+
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="label">Full name</label>
@@ -78,6 +84,7 @@ export default function Register() {
               required
             />
           </div>
+
           <div className="form-group">
             <label className="label">Email</label>
             <input
@@ -88,6 +95,7 @@ export default function Register() {
               required
             />
           </div>
+
           <div className="form-group" style={{ position: 'relative' }}>
             <label className="label">Password</label>
             <input
@@ -104,20 +112,21 @@ export default function Register() {
               style={{
                 position: 'absolute',
                 right: '1rem',
-                top: '2.5rem',
+                top: '2.35rem',
                 background: 'transparent',
                 border: 'none',
                 color: 'var(--text-secondary)',
                 cursor: 'pointer',
-                fontSize: '1.1rem',
+                fontSize: '0.8rem',
+                fontWeight: 700,
               }}
             >
-              {showPassword ? '🙈' : '👁️'}
+              {showPassword ? 'Hide' : 'Show'}
             </button>
             <div style={{ marginTop: '0.75rem' }}>
-              {passwordRequirements.map((req, idx) => (
+              {passwordRequirements.map((req) => (
                 <div
-                  key={idx}
+                  key={req.label}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -125,16 +134,15 @@ export default function Register() {
                     fontSize: '0.8rem',
                     marginBottom: '0.35rem',
                     color: req.pass ? 'var(--success)' : 'var(--muted)',
-                    transition: 'all 0.3s ease',
-                    animation: req.pass ? 'popIn 0.3s ease' : 'none',
                   }}
                 >
-                  <span style={{ fontSize: '1rem' }}>{req.pass ? '✅' : '❌'}</span>
+                  <span>{req.pass ? 'OK' : '--'}</span>
                   <span>{req.label}</span>
                 </div>
               ))}
             </div>
           </div>
+
           <div className="form-group">
             <label className="label">Role</label>
             <select
@@ -146,20 +154,95 @@ export default function Register() {
               <option value="admin">Instructor (Admin)</option>
             </select>
           </div>
+
           {form.role === 'student' && (
-            <div className="form-group">
-              <label className="label">Student ID (optional)</label>
-              <input
-                className="input"
-                value={form.studentId}
-                onChange={(e) => setForm({ ...form, studentId: e.target.value })}
-              />
-            </div>
+            <>
+              <div className="form-group">
+                <label className="label">Student ID (optional)</label>
+                <input
+                  className="input"
+                  value={form.studentId}
+                  onChange={(e) => setForm({ ...form, studentId: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="label">Level</label>
+                <select
+                  className="input"
+                  value={form.level}
+                  onChange={(e) => setForm({ ...form, level: e.target.value })}
+                  required
+                >
+                  <option value="">Select level</option>
+                  {LEVELS.map((level) => (
+                    <option key={level} value={level}>
+                      {level}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="label">College</label>
+                <select
+                  className="input"
+                  value={form.college}
+                  onChange={(e) => setForm({ ...form, college: e.target.value, faculty: '', department: '' })}
+                  required
+                >
+                  <option value="">Select college</option>
+                  {ACADEMIC_DATA.map((item) => (
+                    <option key={item.college} value={item.college}>
+                      {item.college}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="label">Faculty / School</label>
+                <select
+                  className="input"
+                  value={form.faculty}
+                  onChange={(e) => setForm({ ...form, faculty: e.target.value, department: '' })}
+                  required
+                  disabled={!form.college}
+                >
+                  <option value="">Select faculty or school</option>
+                  {faculties.map((faculty) => (
+                    <option key={faculty.name} value={faculty.name}>
+                      {faculty.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="label">Department</label>
+                <select
+                  className="input"
+                  value={form.department}
+                  onChange={(e) => setForm({ ...form, department: e.target.value })}
+                  required
+                  disabled={!form.faculty}
+                >
+                  <option value="">Select department</option>
+                  {departments.map((department) => (
+                    <option key={department} value={department}>
+                      {department}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
           )}
+
           <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
-            {loading ? 'Creating…' : 'Register'}
+            {loading ? 'Creating...' : 'Register'}
           </button>
         </form>
+
         <p style={{ marginTop: '1.5rem', fontSize: '0.9rem', color: 'var(--muted)' }}>
           Already have an account? <Link to="/login">Sign in</Link>
         </p>
@@ -174,16 +257,6 @@ export default function Register() {
           to {
             opacity: 1;
             transform: translateY(0);
-          }
-        }
-        @keyframes popIn {
-          0% {
-            transform: scale(0.8);
-            opacity: 0;
-          }
-          100% {
-            transform: scale(1);
-            opacity: 1;
           }
         }
       `}</style>

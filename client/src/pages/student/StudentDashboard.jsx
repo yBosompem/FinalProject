@@ -15,11 +15,11 @@ const getTimeBasedGreeting = (name) => {
 
 function getAttemptState(examId, sessions) {
   const forExam = sessions.filter((s) => s.exam?._id === examId || s.exam === examId);
-  if (forExam.some((s) => s.status === 'in_progress')) {
-    return { type: 'resume' };
-  }
   if (forExam.some((s) => ['submitted', 'expired'].includes(s.status))) {
     return { type: 'completed', session: forExam.find((s) => ['submitted', 'expired'].includes(s.status)) };
+  }
+  if (forExam.some((s) => s.status === 'in_progress')) {
+    return { type: 'resume' };
   }
   return { type: 'start' };
 }
@@ -136,20 +136,24 @@ export default function StudentDashboard() {
                   <div key={exam._id} className="card" style={{ marginBottom: '1rem' }}>
                     <h3>{exam.title}</h3>
                     <p style={{ color: 'var(--muted)', fontSize: '0.9rem', margin: '0.5rem 0' }}>
-                      {exam.durationMinutes} minutes · {exam.questions?.length || 0} questions
+                      {exam.durationMinutes} minutes - {exam.questionCount ?? exam.questions?.length ?? 0} questions
                     </p>
                     <p style={{ fontSize: '0.85rem', marginBottom: '1rem' }}>{exam.description}</p>
                     {attempt.type === 'completed' ? (
                       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
                         <span className="badge badge-success">Completed</span>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                          onClick={() => viewResults(attempt.session._id)}
-                        >
-                          View results
-                        </button>
+                        {attempt.session?.exam?.showResultsToStudents ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                            onClick={() => viewResults(attempt.session._id)}
+                          >
+                            View results
+                          </button>
+                        ) : (
+                          <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Results hidden</span>
+                        )}
                       </div>
                     ) : (
                       <Link to={`/student/exam/${exam._id}`} className="btn btn-primary">
@@ -196,20 +200,24 @@ export default function StudentDashboard() {
                           </span>
                         </td>
                         <td>
-                          {s.reportReady && s.correctCount != null
+                          {s.exam?.showResultsToStudents && s.reportReady && s.correctCount != null
                             ? `${s.correctCount}/${s.totalQuestions}`
                             : '—'}
                         </td>
                         <td>
                           {['submitted', 'expired'].includes(s.status) && (
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
-                              onClick={() => viewResults(s._id)}
-                            >
-                              Results
-                            </button>
+                            s.exam?.showResultsToStudents ? (
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
+                                onClick={() => viewResults(s._id)}
+                              >
+                                Results
+                              </button>
+                            ) : (
+                              <span style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>Hidden</span>
+                            )
                           )}
                         </td>
                       </tr>

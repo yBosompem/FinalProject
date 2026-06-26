@@ -6,12 +6,16 @@
 
 function normalizeText(value) {
   return String(value ?? '')
+    .normalize('NFKC')
     .trim()
-    .toLowerCase()
+    .toLocaleLowerCase()
     .replace(/\s+/g, ' ');
 }
 
 function isMcqCorrect(question, studentAnswer) {
+  if (question.correctIndex == null || question.correctIndex === '') {
+    return false;
+  }
   if (studentAnswer.selectedIndex == null || studentAnswer.selectedIndex < 0) {
     return false;
   }
@@ -33,6 +37,11 @@ function gradeAnswer(question, studentAnswer) {
   return isMcqCorrect(question, studentAnswer);
 }
 
+function getQuestionMarks(question) {
+  const marks = Number(question.marks);
+  return Number.isFinite(marks) && marks >= 0 ? marks : 1;
+}
+
 function getStudentAnswerLabel(question, studentAnswer) {
   const type = question.type || 'mcq';
   if (type === 'short') {
@@ -51,6 +60,7 @@ function getCorrectAnswerLabel(question) {
     return question.correctAnswer ?? '—';
   }
   const idx = question.correctIndex;
+  if (idx == null || idx === '') return 'â€”';
   const letter = String.fromCharCode(65 + idx);
   const text = question.options?.[idx];
   return text ? `${letter}. ${text}` : letter;
@@ -58,7 +68,7 @@ function getCorrectAnswerLabel(question) {
 
 function gradeExam(exam, studentAnswers) {
   const questions = exam.questions || [];
-  const totalMarks = questions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
+  const totalMarks = questions.reduce((sum, q) => sum + getQuestionMarks(q), 0);
   let earnedMarks = 0;
 
   const questionBreakdown = questions.map((q, index) => {
@@ -69,7 +79,7 @@ function gradeExam(exam, studentAnswers) {
         textAnswer: '',
       };
     const isCorrect = gradeAnswer(q, studentAnswer);
-    const marks = Number(q.marks) || 1;
+    const marks = getQuestionMarks(q);
     if (isCorrect) earnedMarks += marks;
 
     return {
@@ -91,6 +101,9 @@ function gradeExam(exam, studentAnswers) {
       ? Math.round(((earnedMarks / totalMarks) * maxGradePoints) * 100) / 100
       : 0;
 
+  const totalQuestions = questions.length;
+  const correctCount = questionBreakdown.filter((qb) => qb.isCorrect).length;
+
   return {
     earnedMarks,
     totalMarks,
@@ -98,6 +111,8 @@ function gradeExam(exam, studentAnswers) {
     scaledScore,
     maxGradePoints,
     questionBreakdown,
+    correctCount,
+    totalQuestions,
     gradedAnswers: studentAnswers.map((a) => {
       const q = questions[a.questionIndex];
       return {

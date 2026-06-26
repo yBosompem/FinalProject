@@ -79,6 +79,7 @@ const STUDENT_EVENT_TYPES = [
   'screen_share_started',
   'screen_share_stopped',
   'screen_share_not_monitor',
+  'external_device_connected',
   'voice_detected',
   'whispering_detected',
   'tab_hidden',
@@ -242,7 +243,7 @@ router.get('/flagged', requireRole('admin'), async (req, res) => {
       $or: [{ isFlagged: true }, { riskScore: { $gte: 55 } }],
     })
       .populate('exam', 'title')
-      .populate('student', 'name email studentId')
+      .populate('student', 'name email studentId college faculty department level')
       .sort({ riskScore: -1 });
     res.json(sessions);
   } catch (err) {

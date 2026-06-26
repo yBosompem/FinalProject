@@ -15,6 +15,7 @@ const monitoringEventSchema = new mongoose.Schema(
         'screen_share_started',
         'screen_share_stopped',
         'screen_share_not_monitor',
+        'external_device_connected',
         'exam_submitted',
         'phone_detected',
         'voice_detected',

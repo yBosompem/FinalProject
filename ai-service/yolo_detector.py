@@ -42,6 +42,8 @@ def _weight_candidates() -> list[Path]:
     if env_path:
         paths.append(Path(env_path))
     paths.extend([
+        ROOT / 'yolo26n.pt',
+        ROOT / 'yolov8n.pt',
         ROOT / 'weights' / 'proctoring.pt',
         ROOT / 'runs' / 'detect' / 'proctoring' / 'weights' / 'best.pt',
         ROOT / 'runs' / 'detect' / 'train' / 'weights' / 'best.pt',
@@ -69,13 +71,16 @@ def get_yolo_model():
             except Exception:
                 continue
 
-    # Pretrained fallback for COCO phone/person detection without custom training
-    try:
-        _model = YOLO('yolo26n.pt')
-        _model_path = 'yolo26n.pt'
-        return _model
-    except Exception:
-        return None
+    # Pretrained fallback for COCO phone/person detection without custom training.
+    # Prefer small over nano for better proctoring accuracy, then fall back to nano.
+    for weights in ('yolo11s.pt', 'yolo11n.pt', 'yolov8s.pt', 'yolov8n.pt'):
+        try:
+            _model = YOLO(weights)
+            _model_path = weights
+            return _model
+        except Exception:
+            continue
+    return None
 
 
 def _label_name(names: dict | list, class_id: int) -> str:
@@ -116,7 +121,7 @@ def run_yolo_detections(
     detections: list[dict[str, Any]] = []
 
     try:
-        results = model.predict(frame, verbose=False, conf=0.35, imgsz=640)
+        results = model.predict(frame, verbose=False, conf=0.48, imgsz=640)
     except Exception:
         return []
 
@@ -132,6 +137,8 @@ def run_yolo_detections(
     person_boxes = 0
     phone_found = False
     suspicious_items: list[str] = []
+    best_phone_conf = 0.0
+    best_object_conf: dict[str, float] = {}
 
     for box in boxes:
         class_id = int(box.cls[0])
@@ -141,12 +148,14 @@ def run_yolo_detections(
         if label == 'person' or class_id in {COCO_PERSON, CUSTOM_PERSON}:
             person_boxes += 1
 
-        if _is_phone(class_id, label, custom_dataset):
+        if _is_phone(class_id, label, custom_dataset) and conf >= 0.5:
             phone_found = True
+            best_phone_conf = max(best_phone_conf, conf)
 
-        if label in SUSPICIOUS_LABELS or _is_phone(class_id, label, custom_dataset):
+        if (label in SUSPICIOUS_LABELS or _is_phone(class_id, label, custom_dataset)) and conf >= 0.5:
             if label not in suspicious_items:
                 suspicious_items.append(label or 'device')
+            best_object_conf[label or 'device'] = max(best_object_conf.get(label or 'device', 0.0), conf)
 
     if phone_found and cooldown_ok(session_id, 'phone_detected', 15):
         detections.append({
@@ -155,7 +164,7 @@ def run_yolo_detections(
             'severity': 'high',
             'message': 'Mobile phone or device detected by YOLO',
             'risk_delta': 28,
-            'metadata': {'source': 'yolo', 'model': _model_path},
+            'metadata': {'source': 'yolo', 'model': _model_path, 'confidence': round(best_phone_conf, 3)},
         })
 
     yolo_persons = person_boxes
@@ -178,7 +187,11 @@ def run_yolo_detections(
                 'severity': 'medium',
                 'message': f'Suspicious object detected: {", ".join(other)}',
                 'risk_delta': 18,
-                'metadata': {'source': 'yolo', 'objects': other},
+                'metadata': {
+                    'source': 'yolo',
+                    'objects': other,
+                    'confidence': {k: round(v, 3) for k, v in best_object_conf.items() if k in other},
+                },
             })
 
     return detections
