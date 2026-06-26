@@ -2,6 +2,7 @@ const express = require('express');
 const Exam = require('../models/Exam');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { assertAdminOwnsExam } = require('../utils/adminScope');
+const { getExamAvailability, assertExamAvailable } = require('../utils/examAvailability');
 
 const router = express.Router();
 
@@ -45,6 +46,14 @@ function validateTargeting(body) {
   return { target };
 }
 
+function validateAvailability(body) {
+  if (!body.availableFrom || !body.availableUntil) return null;
+  if (new Date(body.availableFrom) >= new Date(body.availableUntil)) {
+    return 'Availability end time must be after the start time.';
+  }
+  return null;
+}
+
 function normalizeQuestions(questions) {
   return (questions || []).map((q, i) => {
     const type = q.type || (q.options?.length >= 2 ? 'mcq' : 'short');
@@ -77,7 +86,11 @@ router.get('/', async (req, res) => {
       return res.json(
         exams.map((exam) => {
           const obj = exam.toObject();
+          const availability = getExamAvailability(obj);
           obj.questionCount = obj.questions?.length || 0;
+          obj.availabilityStatus = availability.status;
+          obj.canStartNow = availability.canStart;
+          obj.availabilityMessage = availability.message;
           delete obj.questions;
           return obj;
         })
@@ -100,6 +113,9 @@ router.get('/:id', async (req, res) => {
       }
     } else if (!exam.isPublished || !examMatchesStudent(exam, req.user)) {
       return res.status(403).json({ message: 'Exam not available' });
+    } else {
+      const { error } = assertExamAvailable(exam);
+      if (error) return res.status(403).json({ message: error });
     }
 
     const payload = exam.toObject();
@@ -135,6 +151,8 @@ router.post('/', requireRole('admin'), async (req, res) => {
     const normalizedQuestions = normalizeQuestions(questions);
     const { target, error: targetError } = validateTargeting(req.body);
     if (targetError) return res.status(400).json({ message: targetError });
+    const availabilityError = validateAvailability(req.body);
+    if (availabilityError) return res.status(400).json({ message: availabilityError });
 
     const exam = await Exam.create({
       title,
@@ -173,6 +191,8 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
       const merged = { ...owned.toObject(), ...updates };
       const { error: targetError } = validateTargeting(merged);
       if (targetError) return res.status(400).json({ message: targetError });
+      const availabilityError = validateAvailability(merged);
+      if (availabilityError) return res.status(400).json({ message: availabilityError });
     }
     const exam = await Exam.findByIdAndUpdate(req.params.id, updates, {
       new: true,

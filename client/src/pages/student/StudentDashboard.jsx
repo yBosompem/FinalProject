@@ -24,11 +24,50 @@ function getAttemptState(examId, sessions) {
   return { type: 'start' };
 }
 
+function formatDateTime(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getAvailabilityState(exam, now) {
+  const startsAt = exam.availableFrom ? new Date(exam.availableFrom) : null;
+  const endsAt = exam.availableUntil ? new Date(exam.availableUntil) : null;
+
+  if (startsAt && now < startsAt) {
+    return {
+      type: 'pending',
+      label: 'Pending',
+      detail: `Opens ${formatDateTime(startsAt)}`,
+    };
+  }
+
+  if (endsAt && now > endsAt) {
+    return {
+      type: 'closed',
+      label: 'Closed',
+      detail: `Closed ${formatDateTime(endsAt)}`,
+    };
+  }
+
+  return {
+    type: 'available',
+    label: 'Available',
+    detail: endsAt ? `Closes ${formatDateTime(endsAt)}` : '',
+  };
+}
+
 export default function StudentDashboard() {
   const { user } = useAuth();
   const location = useLocation();
   const [exams, setExams] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [now, setNow] = useState(() => new Date());
   const [error, setError] = useState('');
   const [resultsModal, setResultsModal] = useState(null);
   const [submitNotice, setSubmitNotice] = useState(location.state?.message || null);
@@ -47,6 +86,11 @@ export default function StudentDashboard() {
         setSessions(s);
       })
       .catch((err) => setError(err.message));
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const viewResults = async (sessionId) => {
@@ -132,12 +176,18 @@ export default function StudentDashboard() {
             ) : (
               exams.map((exam) => {
                 const attempt = getAttemptState(exam._id, sessions);
+                const availability = getAvailabilityState(exam, now);
                 return (
                   <div key={exam._id} className="card" style={{ marginBottom: '1rem' }}>
                     <h3>{exam.title}</h3>
                     <p style={{ color: 'var(--muted)', fontSize: '0.9rem', margin: '0.5rem 0' }}>
                       {exam.durationMinutes} minutes - {exam.questionCount ?? exam.questions?.length ?? 0} questions
                     </p>
+                    {availability.detail && (
+                      <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+                        {availability.detail}
+                      </p>
+                    )}
                     <p style={{ fontSize: '0.85rem', marginBottom: '1rem' }}>{exam.description}</p>
                     {attempt.type === 'completed' ? (
                       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -155,10 +205,18 @@ export default function StudentDashboard() {
                           <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Results hidden</span>
                         )}
                       </div>
-                    ) : (
+                    ) : attempt.type === 'resume' ? (
                       <Link to={`/student/exam/${exam._id}`} className="btn btn-primary">
-                        {attempt.type === 'resume' ? 'Resume exam' : 'Start exam'}
+                        Resume exam
                       </Link>
+                    ) : availability.type === 'available' ? (
+                      <Link to={`/student/exam/${exam._id}`} className="btn btn-primary">
+                        Start exam
+                      </Link>
+                    ) : (
+                      <button type="button" className="btn btn-ghost" disabled>
+                        {availability.label}
+                      </button>
                     )}
                   </div>
                 );

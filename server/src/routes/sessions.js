@@ -6,6 +6,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const { computeRiskScore, shouldFlag } = require('../services/riskScore');
 const { finalizeSession } = require('../services/finalizeSession');
 const { getAdminExamIds, assertAdminOwnsSession, assertAdminOwnsExam } = require('../utils/adminScope');
+const { getExamAvailability, assertExamAvailable } = require('../utils/examAvailability');
 
 const router = express.Router();
 const COMPLETED_STATUSES = ['submitted', 'expired'];
@@ -128,18 +129,35 @@ router.get('/exam/:examId/status', requireRole('student'), async (req, res) => {
       return res.status(404).json({ message: 'Exam not available' });
     }
 
+    const availability = getExamAvailability(exam);
+
     const session = await ExamSession.findOne({
       exam: exam._id,
       student: req.user._id,
     }).sort({ createdAt: -1 });
 
     if (!session) {
-      return res.json({ canStart: true, canResume: false, session: null });
+      return res.json({
+        canStart: availability.canStart,
+        canResume: false,
+        session: null,
+        availabilityStatus: availability.status,
+        availableFrom: availability.startsAt,
+        availableUntil: availability.endsAt,
+        message: availability.canStart ? undefined : availability.message,
+      });
     }
 
     const currentSession = await finalizeIfExpired(session);
     if (currentSession.status === 'in_progress') {
-      return res.json({ canStart: true, canResume: true, session: currentSession });
+      return res.json({
+        canStart: true,
+        canResume: true,
+        session: currentSession,
+        availabilityStatus: availability.status,
+        availableFrom: availability.startsAt,
+        availableUntil: availability.endsAt,
+      });
     }
 
     return res.json({
@@ -184,6 +202,10 @@ router.post('/start/:examId', requireRole('student'), async (req, res) => {
     const exam = await Exam.findById(req.params.examId);
     if (!exam || !exam.isPublished || !examMatchesStudent(exam, req.user)) {
       return res.status(404).json({ message: 'Exam not available' });
+    }
+    const { error: availabilityError } = assertExamAvailable(exam);
+    if (availabilityError) {
+      return res.status(403).json({ message: availabilityError });
     }
 
     const completed = await ExamSession.findOne({
