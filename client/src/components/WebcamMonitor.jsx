@@ -2,10 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 
 const ALERT_LABELS = {
-  no_face: 'No face detected',
+  no_face: 'Face not visible for several frames',
   multiple_faces: 'Multiple faces detected',
-  looking_away: 'Looking away from screen',
-  unusual_movement: 'Unusual movement',
+  looking_away: 'Sustained looking away',
+  eye_gaze_away: 'Sustained eye gaze away',
+  mouth_open: 'Sustained mouth opening',
+  unusual_movement: 'Unusual movement observed',
+  phone_detected: 'Mobile phone detected',
+  suspicious_object_detected: 'Potential restricted object',
+  face_spoofing: 'Possible spoofing signal',
 };
 
 export default function WebcamMonitor({ sessionId, onRiskUpdate }) {

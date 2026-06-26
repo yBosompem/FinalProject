@@ -2,17 +2,92 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardR
 import { api } from '../api/client';
 
 const ALERT_LABELS = {
-  no_face: 'No face detected',
+  no_face: 'Face not visible for several frames',
   multiple_faces: 'Multiple faces detected',
-  looking_away: 'Looking away from screen',
-  unusual_movement: 'Unusual movement',
-  phone_detected: 'Mobile phone / device detected',
-  voice_detected: 'Voice detected',
-  whispering_detected: 'Whispering / low voice detected',
-  suspicious_head_movement: 'Suspicious head movement',
+  looking_away: 'Sustained looking away',
+  eye_gaze_away: 'Sustained eye gaze away',
+  mouth_open: 'Sustained mouth opening',
+  unusual_movement: 'Unusual movement observed',
+  phone_detected: 'Mobile phone detected',
+  suspicious_object_detected: 'Potential restricted object',
+  face_spoofing: 'Possible spoofing signal',
+  voice_detected: 'Voice observed',
+  whispering_detected: 'Low voice / whispering observed',
+  speech_match_detected: 'Speech matched exam keywords',
+  suspicious_head_movement: 'Unusual head movement',
   tab_hidden: 'Left the exam screen',
   window_blur: 'Exam window lost focus',
 };
+
+const STOP_WORDS = new Set([
+  'about',
+  'after',
+  'again',
+  'also',
+  'answer',
+  'because',
+  'before',
+  'between',
+  'could',
+  'define',
+  'describe',
+  'during',
+  'each',
+  'exam',
+  'explain',
+  'from',
+  'give',
+  'have',
+  'into',
+  'list',
+  'many',
+  'more',
+  'most',
+  'name',
+  'only',
+  'question',
+  'should',
+  'than',
+  'that',
+  'their',
+  'them',
+  'then',
+  'there',
+  'these',
+  'they',
+  'this',
+  'what',
+  'when',
+  'where',
+  'which',
+  'while',
+  'with',
+  'would',
+]);
+
+function tokenizeSpeech(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length >= 4 && !STOP_WORDS.has(word));
+}
+
+function buildExamKeywords(examContext) {
+  const questions = examContext?.questions || [];
+  const corpus = questions
+    .map((q) => [q.text, ...(q.options || []), q.correctAnswer].filter(Boolean).join(' '))
+    .join(' ');
+  const counts = new Map();
+  tokenizeSpeech(corpus).forEach((word) => {
+    counts.set(word, (counts.get(word) || 0) + 1);
+  });
+  return new Set(
+    [...counts.entries()]
+      .filter(([, count]) => count <= 4)
+      .map(([word]) => word)
+  );
+}
 
 function StatusDot({ status }) {
   const cls =
@@ -80,6 +155,7 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     sessionId,
     active,
     setupMode = 'all',
+    examContext,
     onRiskUpdate,
     onScreenShareLost,
     onFocusViolation,
@@ -98,6 +174,10 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
   const recordChunksRef = useRef([]);
   const audioContextRef = useRef(null);
   const voiceStreakRef = useRef(0);
+  const recognitionRef = useRef(null);
+  const speechKeywordsRef = useRef(new Set());
+  const speechAlertCooldownRef = useRef(0);
+  const speechRestartTimerRef = useRef(null);
 
   const webcamStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
@@ -123,6 +203,19 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     }
     audioContextRef.current?.close();
     audioContextRef.current = null;
+    if (speechRestartTimerRef.current) {
+      clearTimeout(speechRestartTimerRef.current);
+      speechRestartTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+      recognitionRef.current = null;
+    }
   }, []);
 
   const stopAll = useCallback(() => {
@@ -189,6 +282,77 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     });
   }, []);
 
+  useEffect(() => {
+    speechKeywordsRef.current = buildExamKeywords(examContext);
+  }, [examContext]);
+
+  const handleSpeechTranscript = useCallback(
+    (transcript) => {
+      if (!active || !sessionId) return;
+      const words = tokenizeSpeech(transcript);
+      const keywords = speechKeywordsRef.current;
+      if (!words.length || keywords.size === 0) return;
+
+      const matches = [...new Set(words.filter((word) => keywords.has(word)))];
+      const now = Date.now();
+      if (matches.length >= 3 && now - speechAlertCooldownRef.current > 30000) {
+        speechAlertCooldownRef.current = now;
+        reportEvent(
+          'speech_match_detected',
+          'Speech matched exam keywords; review transcript context',
+          'medium',
+          {
+            transcript: transcript.slice(0, 240),
+            matches: matches.slice(0, 12),
+            matchCount: matches.length,
+          }
+        );
+        setLastAlert({
+          type: 'speech_match_detected',
+          message: ALERT_LABELS.speech_match_detected,
+        });
+      }
+    },
+    [active, sessionId, reportEvent]
+  );
+
+  const startSpeechTranscriptMonitor = useCallback(() => {
+    if (recognitionRef.current || !active || !sessionId) return;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event) => {
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          if (!event.results[i].isFinal) continue;
+          const transcript = event.results[i][0]?.transcript || '';
+          handleSpeechTranscript(transcript);
+        }
+      };
+
+      recognition.onerror = () => {
+        /* Speech recognition can be unavailable/offline; loudness monitoring still runs. */
+      };
+
+      recognition.onend = () => {
+        recognitionRef.current = null;
+        if (active && sessionId) {
+          speechRestartTimerRef.current = setTimeout(startSpeechTranscriptMonitor, 1200);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+    }
+  }, [active, sessionId, handleSpeechTranscript]);
+
   const captureAndAnalyze = useCallback(async () => {
     const video = webcamRef.current;
     const screen = screenRef.current;
@@ -246,9 +410,9 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
               reportEvent(
                 whisper ? 'whispering_detected' : 'voice_detected',
                 whisper
-                  ? 'Low voice / whispering detected during exam'
-                  : 'Voice or speech detected during exam',
-                whisper ? 'high' : 'medium',
+                  ? 'Low voice / whispering observed during exam'
+                  : 'Voice or speech observed during exam',
+                'medium',
                 { level: Math.round(avg * 100) }
               );
               voiceStreakRef.current = 0;
@@ -400,6 +564,7 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     if (!audioContextRef.current && webcamStreamRef.current) {
       startVoiceMonitor(webcamStreamRef.current);
     }
+    startSpeechTranscriptMonitor();
 
     if (recordingStatus === 'off' && screenStatus === 'active') {
       startCompositeRecording();
@@ -417,6 +582,7 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     recordingStatus,
     startCompositeRecording,
     startVoiceMonitor,
+    startSpeechTranscriptMonitor,
   ]);
 
   useEffect(() => () => stopAll(), [stopAll]);

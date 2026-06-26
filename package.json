@@ -11,9 +11,7 @@
     "build:client": "npm run build --prefix client",
     "desktop": "npm run build:client && electron .",
     "seed": "npm run seed --prefix server",
-    "ai": "cd ai-service && python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000",
-    "ai:train": "cd ai-service && python train.py",
-    "ai:train:coco8": "cd ai-service && python train.py --data data/coco8.yaml --epochs 100 --imgsz 640"
+    "ai": "cd ai-service && python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000"
   },
   "dependencies": {
     "@tensorflow-models/coco-ssd": "^2.2.3",

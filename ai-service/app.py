@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from detector import analyze_frame, reset_session
-from yolo_detector import yolo_status
+from upstream_models import upstream_status
 
 app = FastAPI(
     title='Exam Monitor AI Service',
@@ -27,7 +27,7 @@ class AnalyzeRequest(BaseModel):
 
 @app.get('/health')
 def health():
-    return {'status': 'ok', 'service': 'ai-monitoring', 'yolo': yolo_status()}
+    return {'status': 'ok', 'service': 'ai-monitoring', 'models': upstream_status()}
 
 
 @app.post('/analyze')

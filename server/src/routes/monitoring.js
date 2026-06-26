@@ -6,7 +6,7 @@ const ExamSession = require('../models/ExamSession');
 const MonitoringEvent = require('../models/MonitoringEvent');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { analyzeFrame } = require('../services/aiClient');
-const { deltaForEvent, computeRiskScore, shouldFlag } = require('../services/riskScore');
+const { deltaForEvent, effectiveRiskDelta, computeRiskScore, shouldFlag } = require('../services/riskScore');
 const { getAdminExamIds, assertAdminOwnsSession } = require('../utils/adminScope');
 
 const router = express.Router();
@@ -67,7 +67,7 @@ async function recordEvents(session, detections) {
   if (created.length > 0) {
     const allEvents = await MonitoringEvent.find({ session: session._id });
     session.riskScore = computeRiskScore(allEvents);
-    session.alertCount = allEvents.filter((e) => e.riskDelta > 0).length;
+    session.alertCount = allEvents.filter((e) => effectiveRiskDelta(e) > 0).length;
     session.isFlagged = shouldFlag(session.riskScore, session.alertCount);
     await session.save();
   }
@@ -82,8 +82,11 @@ const STUDENT_EVENT_TYPES = [
   'external_device_connected',
   'voice_detected',
   'whispering_detected',
+  'speech_match_detected',
   'tab_hidden',
   'window_blur',
+  'violation',
+  'terminated',
 ];
 
 router.post('/analyze/:sessionId', requireRole('student'), async (req, res) => {
@@ -91,16 +94,11 @@ router.post('/analyze/:sessionId', requireRole('student'), async (req, res) => {
     const { session, error } = await assertSessionAccess(req.params.sessionId, req.user);
     if (error) return res.status(error.status).json({ message: error.message });
 
-    const { image, screenImage } = req.body;
+    const { image } = req.body;
     if (!image) return res.status(400).json({ message: 'Image required (base64)' });
 
     const aiResult = await analyzeFrame(image, session._id.toString());
-    let allDetections = aiResult.detections || [];
-
-    if (screenImage) {
-      const screenResult = await analyzeFrame(screenImage, `${session._id.toString()}_screen`);
-      allDetections = allDetections.concat(screenResult.detections || []);
-    }
+    const allDetections = aiResult.detections || [];
 
     const created = await recordEvents(session, allDetections);
 
@@ -149,7 +147,7 @@ router.post('/events/:sessionId', async (req, res) => {
 
     const allEvents = await MonitoringEvent.find({ session: session._id });
     session.riskScore = computeRiskScore(allEvents);
-    session.alertCount = allEvents.filter((e) => e.riskDelta > 0).length;
+    session.alertCount = allEvents.filter((e) => effectiveRiskDelta(e) > 0).length;
     session.isFlagged = shouldFlag(session.riskScore, session.alertCount);
     await session.save();
 

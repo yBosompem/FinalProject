@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, session } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn, execFile } = require('child_process');
 
 let mainWindow = null;
@@ -8,16 +9,23 @@ let aiProcess = null;
 let isExamActive = false;
 let deviceBaseline = new Set();
 let devicePoller = null;
+let deviceBaselineReady = false;
 
 const SUSPICIOUS_DEVICE_CLASSES = new Set([
-  'USB',
   'WPD',
   'DiskDrive',
   'CDROM',
-  'Image',
-  'Camera',
-  'Bluetooth',
 ]);
+
+const IGNORED_DEVICE_NAME_PATTERNS = [
+  /camera/i,
+  /bluetooth/i,
+  /composite device/i,
+  /host controller/i,
+  /root hub/i,
+  /webcam/i,
+  /wide vision/i,
+];
 
 function startServices() {
   console.log('Starting backend service...');
@@ -38,8 +46,10 @@ function startServices() {
   });
 
   console.log('Starting AI service...');
+  const venvPython = path.join(__dirname, '..', '.venv', 'Scripts', 'python.exe');
+  const pythonBin = fs.existsSync(venvPython) ? venvPython : 'python';
   // Spawn AI service: python -m uvicorn app:app --host 127.0.0.1 --port 8000
-  aiProcess = spawn('python', ['-m', 'uvicorn', 'app:app', '--host', '127.0.0.1', '--port', '8000'], {
+  aiProcess = spawn(pythonBin, ['-m', 'uvicorn', 'app:app', '--host', '127.0.0.1', '--port', '8000'], {
     cwd: path.join(__dirname, 'ai-service'),
     env: process.env,
   });
@@ -74,6 +84,13 @@ function normalizeDevice(device) {
     deviceClass: String(device.Class || device.PNPClass || '').trim(),
     status: String(device.Status || '').trim(),
   };
+}
+
+function isReportableExternalDevice(device) {
+  if (!SUSPICIOUS_DEVICE_CLASSES.has(device.deviceClass)) {
+    return false;
+  }
+  return !IGNORED_DEVICE_NAME_PATTERNS.some((pattern) => pattern.test(device.name));
 }
 
 function getConnectedDevices() {
@@ -112,15 +129,21 @@ function getConnectedDevices() {
 async function startExternalDeviceMonitor() {
   const devices = await getConnectedDevices();
   deviceBaseline = new Set(devices.map((device) => device.id));
+  deviceBaselineReady = deviceBaseline.size > 0;
 
   clearInterval(devicePoller);
   devicePoller = setInterval(async () => {
     if (!isExamActive || !mainWindow) return;
     const current = await getConnectedDevices();
+    if (!deviceBaselineReady) {
+      deviceBaseline = new Set(current.map((device) => device.id));
+      deviceBaselineReady = true;
+      return;
+    }
     for (const device of current) {
       if (deviceBaseline.has(device.id)) continue;
       deviceBaseline.add(device.id);
-      if (!SUSPICIOUS_DEVICE_CLASSES.has(device.deviceClass)) continue;
+      if (!isReportableExternalDevice(device)) continue;
 
       mainWindow.webContents.send('external-device-connected', {
         name: device.name,
@@ -135,6 +158,7 @@ function stopExternalDeviceMonitor() {
   clearInterval(devicePoller);
   devicePoller = null;
   deviceBaseline = new Set();
+  deviceBaselineReady = false;
 }
 
 function createWindow() {

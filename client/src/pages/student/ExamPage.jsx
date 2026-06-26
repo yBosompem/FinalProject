@@ -339,10 +339,6 @@ export default function ExamPage() {
       }
     };
 
-    const handleBlur = () => {
-      handleStrike('Window lost focus');
-    };
-
     const handleVisibilityChange = () => {
       if (document.hidden) {
         handleStrike('Tab switched or hidden');
@@ -360,7 +356,6 @@ export default function ExamPage() {
     document.addEventListener('cut', block);
     document.addEventListener('dragstart', block);
     document.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('blur', handleBlur);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
@@ -372,7 +367,6 @@ export default function ExamPage() {
       document.removeEventListener('cut', block);
       document.removeEventListener('dragstart', block);
       document.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('blur', handleBlur);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
@@ -625,6 +619,7 @@ export default function ExamPage() {
               sessionId={session?._id}
               active={isExam}
               setupMode={setupMode}
+              examContext={exam}
               onRiskUpdate={handleRiskUpdate}
               onScreenShareLost={handleScreenShareLost}
               onFocusViolation={handleFocusViolation}

@@ -4,14 +4,19 @@ import { api } from '../../api/client';
 import Layout, { NavItem } from '../../components/Layout';
 
 const TYPE_LABELS = {
-  no_face: 'No face in frame',
-  multiple_faces: 'Multiple faces',
-  looking_away: 'Looking away / off screen',
-  unusual_movement: 'Sudden movement',
-  suspicious_head_movement: 'Suspicious head movement',
-  phone_detected: 'Phone / device detected',
-  voice_detected: 'Voice / speech detected',
-  whispering_detected: 'Whispering detected',
+  no_face: 'Face not visible for several frames',
+  multiple_faces: 'Multiple faces visible',
+  looking_away: 'Sustained looking away',
+  eye_gaze_away: 'Sustained eye gaze away',
+  mouth_open: 'Sustained mouth opening',
+  unusual_movement: 'Unusual movement observed',
+  suspicious_head_movement: 'Unusual head movement',
+  face_spoofing: 'Possible spoofing signal',
+  phone_detected: 'Mobile phone detected',
+  suspicious_object_detected: 'Potential restricted object',
+  voice_detected: 'Voice / speech observed',
+  whispering_detected: 'Low voice / whispering observed',
+  speech_match_detected: 'Speech matched exam keywords',
   monitoring_started: 'Monitoring started',
   screen_share_started: 'Screen share started',
   screen_share_stopped: 'Screen share stopped',
@@ -26,11 +31,16 @@ const CHEAT_TYPES = new Set([
   'no_face',
   'multiple_faces',
   'looking_away',
+  'eye_gaze_away',
+  'mouth_open',
   'unusual_movement',
   'suspicious_head_movement',
+  'face_spoofing',
   'phone_detected',
+  'suspicious_object_detected',
   'voice_detected',
   'whispering_detected',
+  'speech_match_detected',
   'screen_share_stopped',
   'tab_hidden',
   'window_blur',
@@ -131,15 +141,21 @@ export default function SessionReport() {
             </p>
             {session.isFlagged && <span className="badge badge-danger">Flagged session</span>}
             <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.5rem' }}>
-              {cheatEvents.length} suspicious event(s) logged
+              {cheatEvents.length} review item(s) logged
+            </p>
+            <p style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.35rem' }}>
+              AI observations are evidence for instructor review, not automatic proof of misconduct.
             </p>
           </div>
         </div>
 
         {Object.keys(summary).length > 0 && (
           <>
-            <h2 style={{ marginBottom: '1rem' }}>Activity summary</h2>
+            <h2 style={{ marginBottom: '1rem' }}>Review summary</h2>
             <div className="card" style={{ marginBottom: '2rem' }}>
+              <p style={{ color: 'var(--muted)', marginBottom: '0.75rem' }}>
+                Items below use sustained detections or model confidence thresholds and should be checked against the recording.
+              </p>
               <ul style={{ listStyle: 'none', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                 {Object.entries(summary).map(([type, count]) => (
                   <li key={type} className="badge badge-warning" style={{ padding: '0.4rem 0.75rem' }}>
