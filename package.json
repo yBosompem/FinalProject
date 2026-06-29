@@ -8,6 +8,7 @@
     "install:all": "npm install --prefix server && npm install --prefix client",
     "server": "npm run dev --prefix server",
     "client": "npm run dev --prefix client",
+    "build": "npm run build:client",
     "build:client": "npm run build --prefix client",
     "desktop": "npm run build:client && electron .",
     "seed": "npm run seed --prefix server",
