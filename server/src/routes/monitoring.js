@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const multer = require('multer');
 const ExamSession = require('../models/ExamSession');
 const MonitoringEvent = require('../models/MonitoringEvent');
@@ -10,11 +11,9 @@ const { deltaForEvent, effectiveRiskDelta, computeRiskScore, shouldFlag } = requ
 const { getAdminExamIds, assertAdminOwnsSession } = require('../utils/adminScope');
 
 const router = express.Router();
-const UPLOADS_ROOT = path.join(__dirname, '../../uploads/recordings');
-
-if (!fs.existsSync(UPLOADS_ROOT)) {
-  fs.mkdirSync(UPLOADS_ROOT, { recursive: true });
-}
+const UPLOADS_ROOT = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'exam-monitor-recordings')
+  : path.join(__dirname, '../../uploads/recordings');
 
 const upload = multer({
   storage: multer.diskStorage({
