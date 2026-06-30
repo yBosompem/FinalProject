@@ -50,8 +50,8 @@ export default function Login() {
   };
 
   return (
-    <div className="container" style={{ maxWidth: 420, paddingTop: '4rem' }}>
-      <div className="glass-card" style={{ padding: '2rem', animation: 'fadeInUp 0.6s ease-out' }}>
+    <div className="container auth-page">
+      <div className="glass-card auth-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
           <h1 className="page-title" style={{ fontSize: '1.5rem', marginBottom: 0 }}>
             {greeting}
@@ -150,18 +150,6 @@ export default function Login() {
         </p>
       </div>
 
-      <style>{`
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-      `}</style>
     </div>
   );
 }

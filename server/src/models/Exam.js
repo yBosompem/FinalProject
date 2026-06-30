@@ -14,12 +14,18 @@ const examSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
     description: { type: String, default: '' },
+    examType: {
+      type: String,
+      enum: ['midsemester', 'end_of_semester'],
+      default: 'midsemester',
+    },
     durationMinutes: { type: Number, required: true, min: 1 },
     rules: { type: String, default: 'Keep your face visible. Do not leave the frame.' },
     questions: [questionSchema],
     maxGradePoints: { type: Number, default: 100, min: 1 },
     isPublished: { type: Boolean, default: false },
     showResultsToStudents: { type: Boolean, default: false },
+    allowScientificCalculator: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     availableFrom: { type: Date },
     availableUntil: { type: Date },

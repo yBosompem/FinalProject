@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, role, studentId, college, faculty, department, level } = req.body;
+    const { name, email, password, role, studentId, referenceNumber, college, faculty, department, level } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email, and password are required' });
     }
@@ -19,10 +19,34 @@ router.post('/register', async (req, res) => {
     }
 
     const normalizedRole = role === 'admin' ? 'admin' : 'student';
+    const normalizedStudentId = String(studentId || '').trim().toUpperCase();
+    const normalizedReferenceNumber = String(referenceNumber || '').trim();
     if (normalizedRole === 'student' && (!college || !faculty || !department || !level)) {
       return res.status(400).json({
         message: 'Student level, college, faculty, and department are required',
       });
+    }
+    if (normalizedRole === 'student') {
+      if (!normalizedStudentId) {
+        return res.status(400).json({ message: 'Index number is required' });
+      }
+      if (normalizedStudentId.length > 7) {
+        return res.status(400).json({ message: 'Index number must be 7 characters or fewer' });
+      }
+      if (!/^\d{8}$/.test(normalizedReferenceNumber)) {
+        return res.status(400).json({ message: 'Reference number must be exactly 8 digits' });
+      }
+      const indexExists = await User.findOne({ role: 'student', studentId: normalizedStudentId });
+      if (indexExists) {
+        return res.status(409).json({ message: 'This index number is already registered.' });
+      }
+      const referenceExists = await User.findOne({
+        role: 'student',
+        referenceNumber: normalizedReferenceNumber,
+      });
+      if (referenceExists) {
+        return res.status(409).json({ message: 'This reference number is already registered.' });
+      }
     }
 
     const user = await User.create({
@@ -30,7 +54,8 @@ router.post('/register', async (req, res) => {
       email: normalizedEmail,
       password,
       role: normalizedRole,
-      studentId: normalizedRole === 'student' ? studentId : '',
+      studentId: normalizedRole === 'student' ? normalizedStudentId : '',
+      referenceNumber: normalizedRole === 'student' ? normalizedReferenceNumber : '',
       college: normalizedRole === 'student' ? college : '',
       faculty: normalizedRole === 'student' ? faculty : '',
       department: normalizedRole === 'student' ? department : '',
@@ -39,6 +64,12 @@ router.post('/register', async (req, res) => {
     const token = signToken(user);
     res.status(201).json({ user, token });
   } catch (err) {
+    if (err.code === 11000 && err.keyPattern?.studentId) {
+      return res.status(409).json({ message: 'This index number is already registered.' });
+    }
+    if (err.code === 11000 && err.keyPattern?.referenceNumber) {
+      return res.status(409).json({ message: 'This reference number is already registered.' });
+    }
     res.status(500).json({ message: err.message });
   }
 });

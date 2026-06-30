@@ -54,6 +54,12 @@ function validateAvailability(body) {
   return null;
 }
 
+function trimTrailingEmptyOptions(options = []) {
+  const cleaned = (options || []).map((option) => String(option || '').trim());
+  while (cleaned.length > 2 && !cleaned[cleaned.length - 1]) cleaned.pop();
+  return cleaned;
+}
+
 function normalizeQuestions(questions) {
   return (questions || []).map((q, i) => {
     const type = q.type || (q.options?.length >= 2 ? 'mcq' : 'short');
@@ -62,13 +68,30 @@ function normalizeQuestions(questions) {
       ...q,
       questionNumber: q.questionNumber ?? i + 1,
       type,
-      options: type === 'short' ? [] : q.options || [],
+      options: type === 'short' ? [] : trimTrailingEmptyOptions(q.options || []),
       correctIndex:
         q.correctIndex === '' || q.correctIndex == null ? null : Number(q.correctIndex),
       correctAnswer: q.correctAnswer || '',
       marks: Number.isFinite(marks) && marks >= 0 ? marks : 1,
     };
   });
+}
+
+function toBoolean(value) {
+  if (value === true || value === 'true' || value === 1 || value === '1') return true;
+  if (value === false || value === 'false' || value === 0 || value === '0') return false;
+  return Boolean(value);
+}
+
+function normalizeExamSettings(body) {
+  const updates = {};
+  if (Object.prototype.hasOwnProperty.call(body, 'showResultsToStudents')) {
+    updates.showResultsToStudents = toBoolean(body.showResultsToStudents);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'allowScientificCalculator')) {
+    updates.allowScientificCalculator = toBoolean(body.allowScientificCalculator);
+  }
+  return updates;
 }
 
 router.get('/', async (req, res) => {
@@ -138,11 +161,13 @@ router.post('/', requireRole('admin'), async (req, res) => {
     const {
       title,
       description,
+      examType,
       durationMinutes,
       rules,
       questions,
       isPublished,
       showResultsToStudents,
+      allowScientificCalculator,
       maxGradePoints,
       availableFrom,
       availableUntil,
@@ -157,12 +182,14 @@ router.post('/', requireRole('admin'), async (req, res) => {
     const exam = await Exam.create({
       title,
       description,
+      examType: examType || 'midsemester',
       durationMinutes,
       rules,
       questions: normalizedQuestions,
       maxGradePoints: maxGradePoints ?? 100,
       isPublished: Boolean(isPublished),
-      showResultsToStudents: Boolean(showResultsToStudents),
+      showResultsToStudents: toBoolean(showResultsToStudents),
+      allowScientificCalculator: toBoolean(allowScientificCalculator),
       availableFrom: availableFrom || undefined,
       availableUntil: availableUntil || undefined,
       ...target,
@@ -182,6 +209,7 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     const { createdBy, targetLevel, ...rest } = req.body;
     const updates = {
       ...rest,
+      ...normalizeExamSettings(req.body),
       ...(Array.isArray(req.body.questions) ? { questions: normalizeQuestions(req.body.questions) } : {}),
       ...(Object.prototype.hasOwnProperty.call(req.body, 'targetLevel')
         ? { targetLevel: targetLevel ? Number(targetLevel) : null }
@@ -195,6 +223,22 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
       if (availabilityError) return res.status(400).json({ message: availabilityError });
     }
     const exam = await Exam.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true,
+    });
+    res.json(exam);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.patch('/:id/settings', requireRole('admin'), async (req, res) => {
+  try {
+    const owned = await assertAdminOwnsExam(req.user._id, req.params.id);
+    if (!owned) return res.status(403).json({ message: 'You can only edit exams you created' });
+
+    const settings = normalizeExamSettings(req.body);
+    const exam = await Exam.findByIdAndUpdate(req.params.id, settings, {
       new: true,
       runValidators: true,
     });

@@ -1,6 +1,6 @@
 const ExamSession = require('../models/ExamSession');
 const MonitoringEvent = require('../models/MonitoringEvent');
-const { computeRiskScore, shouldFlag } = require('./riskScore');
+const { computeRiskScore, effectiveRiskDelta, shouldFlag } = require('./riskScore');
 const { gradeExam } = require('./grading');
 
 async function finalizeSession(sessionId, { answers, status = 'submitted', autoSubmit = false } = {}) {
@@ -28,7 +28,7 @@ async function finalizeSession(sessionId, { answers, status = 'submitted', autoS
     .select('type severity riskDelta')
     .lean();
   session.riskScore = computeRiskScore(events);
-  session.alertCount = events.filter((e) => e.riskDelta > 0).length;
+  session.alertCount = events.filter((e) => effectiveRiskDelta(e) > 0).length;
   session.isFlagged = shouldFlag(session.riskScore, session.alertCount);
   session.reportReady = true;
 
@@ -54,7 +54,7 @@ async function finalizeSession(sessionId, { answers, status = 'submitted', autoS
 
   return ExamSession.findById(sessionId)
     .populate('exam', 'title showResultsToStudents maxGradePoints')
-    .populate('student', 'name email studentId');
+    .populate('student', 'name email studentId referenceNumber');
 }
 
 module.exports = { finalizeSession };

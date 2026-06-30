@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../api/client';
 import Layout, { NavItem } from '../../components/Layout';
@@ -15,23 +15,37 @@ const emptyQuestion = (n = 1) => ({
   questionNumber: n,
   text: '',
   type: 'mcq',
-  options: ['', '', '', ''],
+  options: ['', '', '', '', ''],
   correctIndex: '',
   correctAnswer: '',
   marks: 1,
 });
+
+function padMcqOptions(options = []) {
+  return [...options, '', '', '', '', ''].slice(0, 5);
+}
+
+function trimTrailingEmptyOptions(options = []) {
+  const padded = padMcqOptions(options).map((option) => String(option || '').trim());
+  while (padded.length > 2 && !padded[padded.length - 1]) padded.pop();
+  return padded;
+}
 
 export default function CreateExam() {
   const navigate = useNavigate();
   const { examId } = useParams();
   const isEditMode = Boolean(examId);
   const [tab, setTab] = useState('setup');
+  const [isPublished, setIsPublished] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [examType, setExamType] = useState('midsemester');
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [maxGradePoints, setMaxGradePoints] = useState(70);
   const [rules, setRules] = useState('Keep your face visible. Do not leave the frame.');
   const [showResultsToStudents, setShowResultsToStudents] = useState(false);
+  const [allowScientificCalculator, setAllowScientificCalculator] = useState(false);
+  const calculatorTouchedRef = useRef(false);
   const [availableFrom, setAvailableFrom] = useState('');
   const [availableUntil, setAvailableUntil] = useState('');
   const [targetCollege, setTargetCollege] = useState('');
@@ -55,22 +69,27 @@ export default function CreateExam() {
       .then((exam) => {
         setTitle(exam.title || '');
         setDescription(exam.description || '');
+        setExamType(exam.examType || 'midsemester');
         setDurationMinutes(exam.durationMinutes || 30);
         setMaxGradePoints(exam.maxGradePoints || 70);
         setRules(exam.rules || '');
         setShowResultsToStudents(Boolean(exam.showResultsToStudents));
+        if (!calculatorTouchedRef.current) {
+          setAllowScientificCalculator(Boolean(exam.allowScientificCalculator));
+        }
         setAvailableFrom(exam.availableFrom ? String(exam.availableFrom).slice(0, 16) : '');
         setAvailableUntil(exam.availableUntil ? String(exam.availableUntil).slice(0, 16) : '');
         setTargetCollege(exam.targetCollege || '');
         setTargetFaculty(exam.targetFaculty || '');
         setTargetDepartment(exam.targetDepartment || '');
         setTargetLevel(exam.targetLevel ? String(exam.targetLevel) : '');
+        setIsPublished(Boolean(exam.isPublished));
         setQuestions(
           (exam.questions?.length ? exam.questions : [emptyQuestion(1)]).map((q, i) => ({
             questionNumber: q.questionNumber ?? i + 1,
             text: q.text || '',
             type: q.type || 'mcq',
-            options: q.type === 'short' ? [] : q.options?.length ? q.options : ['', '', '', ''],
+            options: q.type === 'short' ? [] : padMcqOptions(q.options),
             correctIndex: q.correctIndex == null ? '' : q.correctIndex,
             correctAnswer: q.correctAnswer || '',
             marks: q.marks ?? 1,
@@ -268,6 +287,7 @@ export default function CreateExam() {
       const payload = {
         title,
         description,
+        examType,
         durationMinutes: Number(durationMinutes),
         maxGradePoints: Number(maxGradePoints),
         rules,
@@ -281,19 +301,26 @@ export default function CreateExam() {
           questionNumber: q.questionNumber ?? i + 1,
           text: q.text,
           type: q.type || 'mcq',
-          options: q.type === 'short' ? [] : q.options,
+          options: q.type === 'short' ? [] : trimTrailingEmptyOptions(q.options),
           correctIndex:
             q.correctIndex === '' || q.correctIndex == null ? null : Number(q.correctIndex),
           correctAnswer: q.correctAnswer || '',
           marks: q.marks === '' || q.marks == null ? 1 : Number(q.marks),
         })),
-        isPublished: isEditMode ? false : true,
+        isPublished: isEditMode ? isPublished : true,
         showResultsToStudents,
+        allowScientificCalculator,
       };
+      let savedExam;
       if (isEditMode) {
-        await api.updateExam(examId, payload);
+        savedExam = await api.updateExam(examId, payload);
+        savedExam = await api.updateExamSettings(examId, { allowScientificCalculator });
       } else {
-        await api.createExam(payload);
+        savedExam = await api.createExam(payload);
+      }
+      if (Boolean(savedExam.allowScientificCalculator) !== Boolean(allowScientificCalculator)) {
+        setAllowScientificCalculator(Boolean(allowScientificCalculator));
+        throw new Error('Calculator permission was not saved by the server. Restart the backend/Electron app and save again.');
       }
       navigate('/admin');
     } catch (err) {
@@ -357,6 +384,13 @@ export default function CreateExam() {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                 />
+              </div>
+              <div className="form-group">
+                <label className="label">Examination type</label>
+                <select className="input" value={examType} onChange={(e) => setExamType(e.target.value)} required>
+                  <option value="midsemester">Midsemester Exam</option>
+                  <option value="end_of_semester">End of Semester Exam</option>
+                </select>
               </div>
               <div className="grid-2">
                 <div className="form-group">
@@ -432,6 +466,17 @@ export default function CreateExam() {
                   onChange={(e) => setShowResultsToStudents(e.target.checked)}
                 />
                 Allow students to view graded results after submitting
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '0.75rem' }}>
+                <input
+                  type="checkbox"
+                  checked={allowScientificCalculator}
+                  onChange={(e) => {
+                    calculatorTouchedRef.current = true;
+                    setAllowScientificCalculator(e.target.checked);
+                  }}
+                />
+                Allow scientific calculator during the exam
               </label>
               <div className="card" style={{ background: 'var(--surface2)', marginTop: '1.25rem' }}>
                 <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Student routing</h3>
@@ -517,7 +562,7 @@ export default function CreateExam() {
               <div className="card" style={{ background: 'var(--surface2)', marginBottom: '1rem' }}>
                 <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Upload questions (CSV / DOCX / DOC / PDF)</h3>
                 <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.75rem' }}>
-                  Supports CSV columns or normal documents with numbered questions, A-D options, and short-answer/theory
+                  Supports CSV columns or normal documents with numbered questions, A-E options, and short-answer/theory
                   sections.
                 </p>
                 <div
@@ -679,7 +724,20 @@ export default function CreateExam() {
                       <select
                         className="input"
                         value={q.type || 'mcq'}
-                        onChange={(e) => updateQuestion(qi, 'type', e.target.value)}
+                        onChange={(e) => {
+                          const nextType = e.target.value;
+                          setQuestions((qs) =>
+                            qs.map((question, index) =>
+                              index === qi
+                                ? {
+                                    ...question,
+                                    type: nextType,
+                                    options: nextType === 'mcq' ? padMcqOptions(question.options) : [],
+                                  }
+                                : question
+                            )
+                          );
+                        }}
                       >
                         <option value="mcq">Multiple choice</option>
                         <option value="short">Short answer</option>

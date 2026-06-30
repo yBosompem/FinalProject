@@ -6,6 +6,7 @@ import Layout, { NavItem } from '../../components/Layout';
 export default function ExamStudents() {
   const { examId } = useParams();
   const [data, setData] = useState(null);
+  const [allSessions, setAllSessions] = useState([]);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState({
     college: '',
@@ -15,9 +16,11 @@ export default function ExamStudents() {
   });
 
   const load = () => {
-    api
-      .getExamSubmissions(examId)
-      .then(setData)
+    Promise.all([api.getExamSubmissions(examId), api.getSessions()])
+      .then(([submissions, sessions]) => {
+        setData(submissions);
+        setAllSessions(sessions);
+      })
       .catch((err) => setError(err.message));
   };
 
@@ -49,6 +52,36 @@ export default function ExamStudents() {
   }
 
   const completed = data.sessions.filter((s) => ['submitted', 'expired'].includes(s.status));
+  const sessionGrade = (s) =>
+    s?.reportReady && s.scaledScore != null ? Number(s.scaledScore) : '---';
+  const sessionRaw = (s) =>
+    s?.reportReady && s.correctCount != null
+      ? `${s.correctCount} / ${s.totalQuestions ?? s.exam?.questionCount ?? '---'}`
+      : '---';
+  const numericGrade = (s) => (s?.reportReady && Number.isFinite(Number(s.scaledScore)) ? Number(s.scaledScore) : 0);
+  const normalizeCourseTitle = (title) =>
+    String(title || '')
+      .toLowerCase()
+      .replace(/\b(midsemester|midsem|midterm|end\s*of\s*semester|semester|exam|examination)\b/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  const courseKey = normalizeCourseTitle(data.exam.title);
+  const sessionStudentKey = (s) => s.student?.studentId || s.student?._id || s.student?.email || '';
+  const relatedCompletedSessions = allSessions.filter(
+    (s) =>
+      ['submitted', 'expired'].includes(s.status) &&
+      normalizeCourseTitle(s.exam?.title) === courseKey
+  );
+  const findRelatedScore = (studentKey, type) =>
+    relatedCompletedSessions.find(
+      (s) => sessionStudentKey(s) === studentKey && s.exam?.examType === type
+    );
+  const finalGrade = (studentKey) => {
+    const mid = findRelatedScore(studentKey, 'midsemester');
+    const end = findRelatedScore(studentKey, 'end_of_semester');
+    if (!mid?.reportReady && !end?.reportReady) return '---';
+    return Number((numericGrade(mid) + numericGrade(end)).toFixed(2));
+  };
   const optionValues = (field) =>
     Array.from(
       new Set(
@@ -70,22 +103,35 @@ export default function ExamStudents() {
       );
     })
     .sort((a, b) => {
-      const name = (a.student?.name || '').localeCompare(b.student?.name || '');
-      if (name !== 0) return name;
-      return String(a.student?.studentId || '').localeCompare(String(b.student?.studentId || ''));
+      const indexOrder = String(a.student?.studentId || '').localeCompare(
+        String(b.student?.studentId || ''),
+        undefined,
+        { numeric: true, sensitivity: 'base' }
+      );
+      if (indexOrder !== 0) return indexOrder;
+      return String(a.student?.name || '').localeCompare(String(b.student?.name || ''));
     });
 
   const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const compactResultRow = (s) => {
+    const studentKey = sessionStudentKey(s);
+    const mid = findRelatedScore(studentKey, 'midsemester');
+    const end = findRelatedScore(studentKey, 'end_of_semester');
+    return [
+      s.student?.name || '',
+      s.student?.studentId || '',
+      s.student?.referenceNumber || '',
+      data.exam.title || '',
+      sessionGrade(mid),
+      sessionGrade(end),
+      finalGrade(studentKey),
+    ];
+  };
 
   const exportCsv = () => {
     const rows = [
-      ['Name', 'Student ID / Index', 'Course title', 'Grade'],
-      ...filteredSessions.map((s) => [
-        s.student?.name || '',
-        s.student?.studentId || '',
-        data.exam.title || '',
-        s.reportReady ? `${s.scaledScore ?? ''}/${s.maxGradePoints ?? data.exam.maxGradePoints ?? 100}` : '',
-      ]),
+      ['Student name', 'Index number', 'Reference number', 'Course title', 'Midsem grade', 'End sem grade', 'Final grade'],
+      ...filteredSessions.map(compactResultRow),
     ];
     const csv = rows.map((row) => row.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -137,12 +183,13 @@ export default function ExamStudents() {
         <strong>{s.student?.name}</strong>
       </td>
       <td>{s.student?.studentId || '---'}</td>
+      <td>{s.student?.referenceNumber || '---'}</td>
       <td>{data.exam.title}</td>
-      <td>
-        {s.reportReady
-          ? `${s.scaledScore ?? '---'} / ${s.maxGradePoints ?? data.exam.maxGradePoints ?? 100}`
-          : '---'}
-      </td>
+      <td>{sessionRaw(findRelatedScore(sessionStudentKey(s), 'midsemester'))}</td>
+      <td>{sessionRaw(findRelatedScore(sessionStudentKey(s), 'end_of_semester'))}</td>
+      <td>{sessionGrade(findRelatedScore(sessionStudentKey(s), 'midsemester'))}</td>
+      <td>{sessionGrade(findRelatedScore(sessionStudentKey(s), 'end_of_semester'))}</td>
+      <td>{finalGrade(sessionStudentKey(s))}</td>
       <td className="no-print">
         {['submitted', 'expired'].includes(s.status) ? (
           <Link to={`/admin/report/${s._id}`}>View report</Link>
@@ -164,7 +211,9 @@ export default function ExamStudents() {
     >
       <div className="container">
         <h1 className="page-title">{data.exam.title}</h1>
-        <p className="page-sub">Completed results, grouped by college, faculty, department, and level.</p>
+        <p className="page-sub">
+          Completed results, grouped by college, faculty, department, and level.
+        </p>
 
         <div className="card no-print" style={{ marginBottom: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
@@ -242,14 +291,43 @@ export default function ExamStudents() {
                   {group.sessions.length} session(s)
                 </span>
               </div>
-              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div className="card print-only" style={{ padding: 0, overflow: 'hidden', marginBottom: '1rem' }}>
                 <table>
                   <thead>
                     <tr>
                       <th>Student name</th>
-                      <th>Student ID</th>
+                      <th>Index number</th>
+                      <th>Reference number</th>
                       <th>Course title</th>
-                      <th>Grade</th>
+                      <th>Midsem grade</th>
+                      <th>End sem grade</th>
+                      <th>Final grade</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.sessions.map((s) => (
+                      <tr key={`print-${s._id}`}>
+                        {compactResultRow(s).map((cell, index) => (
+                          <td key={index}>{cell}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="card no-print-details" style={{ padding: 0, overflow: 'hidden' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student name</th>
+                      <th>Index number</th>
+                      <th>Reference number</th>
+                      <th>Course title</th>
+                      <th>Midsem raw</th>
+                      <th>End sem raw</th>
+                      <th>Midsem grade</th>
+                      <th>End sem grade</th>
+                      <th>Final grade</th>
                       <th className="no-print">Report</th>
                     </tr>
                   </thead>

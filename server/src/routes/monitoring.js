@@ -240,7 +240,7 @@ router.get('/flagged', requireRole('admin'), async (req, res) => {
       $or: [{ isFlagged: true }, { riskScore: { $gte: 55 } }],
     })
       .populate('exam', 'title')
-      .populate('student', 'name email studentId college faculty department level')
+      .populate('student', 'name email studentId referenceNumber college faculty department level')
       .sort({ riskScore: -1 });
     res.json(sessions);
   } catch (err) {

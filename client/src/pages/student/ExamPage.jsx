@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../api/client';
+import ThemeToggle from '../../components/ThemeToggle';
 import ProctoringMonitor from '../../components/ProctoringMonitor';
 import QuestionNavigator, { isFlagged } from '../../components/QuestionNavigator';
 
@@ -30,12 +31,449 @@ function countAnswered(answers, questions) {
 }
 
 const FORBIDDEN_SHORTCUT_KEYS = new Set(['c', 'v', 's', 'u', 'p']);
+const FUNCTION_KEYS = new Set(Array.from({ length: 12 }, (_, i) => `F${i + 1}`));
+const FONT_OPTIONS = [
+  { value: 'system', label: 'System default' },
+  { value: 'arial', label: 'Arial', stack: "Arial, Helvetica, sans-serif" },
+  { value: 'verdana', label: 'Verdana', stack: "Verdana, Geneva, sans-serif" },
+  { value: 'tahoma', label: 'Tahoma', stack: "Tahoma, Geneva, sans-serif" },
+  { value: 'trebuchet', label: 'Trebuchet MS', stack: "'Trebuchet MS', Arial, sans-serif" },
+  { value: 'calibri', label: 'Calibri', stack: "Calibri, Candara, Segoe, sans-serif" },
+  { value: 'segoe', label: 'Segoe UI', stack: "'Segoe UI', Arial, sans-serif" },
+  { value: 'lucida', label: 'Lucida Sans', stack: "'Lucida Sans Unicode', 'Lucida Grande', sans-serif" },
+  { value: 'georgia', label: 'Georgia', stack: "Georgia, 'Times New Roman', serif" },
+  { value: 'times', label: 'Times New Roman', stack: "'Times New Roman', Times, serif" },
+  { value: 'cambria', label: 'Cambria', stack: "Cambria, Georgia, serif" },
+  { value: 'courier', label: 'Courier New', stack: "'Courier New', Courier, monospace" },
+  { value: 'consolas', label: 'Consolas', stack: "Consolas, 'Courier New', monospace" },
+  { value: 'readable', label: 'High readability', stack: "Verdana, 'Atkinson Hyperlegible', Arial, sans-serif" },
+];
+
+function getReadingFont(font) {
+  return FONT_OPTIONS.find((option) => option.value === font)?.stack || 'inherit';
+}
 
 function ShieldIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M12 2l8 4v6c0 5.25-3.5 9.74-8 11-4.5-1.26-8-5.75-8-11V6l8-4z" />
     </svg>
+  );
+}
+
+function CalculatorIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="5" y="2" width="14" height="20" rx="2" />
+      <path d="M8 6h8M8 10h2M12 10h2M16 10h0M8 14h2M12 14h2M16 14h0M8 18h2M12 18h2M16 18h0" />
+    </svg>
+  );
+}
+
+const FALLBACK_FUNCTION_BUTTONS = [
+  [
+    { label: 'sin', value: 'sin(' },
+    { label: 'cos', value: 'cos(' },
+    { label: 'tan', value: 'tan(' },
+    { label: 'sin^-1', value: 'asin(' },
+    { label: 'cos^-1', value: 'acos(' },
+  ],
+  [
+    { label: 'tan^-1', value: 'atan(' },
+    { label: 'sinh', value: 'sinh(' },
+    { label: 'cosh', value: 'cosh(' },
+    { label: 'tanh', value: 'tanh(' },
+    { label: 'sec', value: 'sec(' },
+  ],
+  [
+    { label: 'csc', value: 'csc(' },
+    { label: 'cot', value: 'cot(' },
+    { label: 'sqrt', value: 'sqrt(' },
+    { label: '|x|', value: 'abs(' },
+    { label: 'exp', value: 'exp(' },
+  ],
+  ['ln(', 'log(', 'sqrt(', '^', '%'],
+];
+const FALLBACK_NUMBER_BUTTONS = [
+  ['C', 'DEL', '(', ')'],
+  ['7', '8', '9', '/'],
+  ['4', '5', '6', '*'],
+  ['1', '2', '3', '-'],
+  ['+/-', '0', '.', '+'],
+  ['pi', 'e', 'ans', '='],
+];
+const FALLBACK_FUNCTIONS = new Set([
+  'sin',
+  'cos',
+  'tan',
+  'asin',
+  'acos',
+  'atan',
+  'sinh',
+  'cosh',
+  'tanh',
+  'sec',
+  'csc',
+  'cot',
+  'ln',
+  'log',
+  'sqrt',
+  'abs',
+  'exp',
+]);
+const FALLBACK_CONSTANTS = { pi: Math.PI, e: Math.E };
+const FALLBACK_OPERATORS = {
+  '+': { precedence: 1, associativity: 'left' },
+  '-': { precedence: 1, associativity: 'left' },
+  '*': { precedence: 2, associativity: 'left' },
+  '/': { precedence: 2, associativity: 'left' },
+  '^': { precedence: 3, associativity: 'right' },
+  'u-': { precedence: 4, associativity: 'right' },
+  '%': { precedence: 5, associativity: 'left' },
+};
+
+function tokenizeFallback(input) {
+  const normalized = String(input || '')
+    .replaceAll('×', '*')
+    .replaceAll('÷', '/')
+    .replaceAll('π', 'pi')
+    .toLowerCase();
+  const tokens = [];
+  let i = 0;
+
+  while (i < normalized.length) {
+    const char = normalized[i];
+    if (/\s/.test(char)) {
+      i += 1;
+      continue;
+    }
+    if (/\d|\./.test(char)) {
+      let value = char;
+      i += 1;
+      while (i < normalized.length && /[\d.]/.test(normalized[i])) {
+        value += normalized[i];
+        i += 1;
+      }
+      const number = Number(value);
+      if (!Number.isFinite(number)) throw new Error('Invalid number');
+      tokens.push({ type: 'number', value: number });
+      continue;
+    }
+    if (/[a-z]/.test(char)) {
+      let value = char;
+      i += 1;
+      while (i < normalized.length && /[a-z]/.test(normalized[i])) {
+        value += normalized[i];
+        i += 1;
+      }
+      if (FALLBACK_FUNCTIONS.has(value)) tokens.push({ type: 'function', value });
+      else if (Object.prototype.hasOwnProperty.call(FALLBACK_CONSTANTS, value)) {
+        tokens.push({ type: 'number', value: FALLBACK_CONSTANTS[value] });
+      } else throw new Error('Unknown function');
+      continue;
+    }
+    if (char === '(' || char === ')') {
+      tokens.push({ type: char === '(' ? 'leftParen' : 'rightParen', value: char });
+      i += 1;
+      continue;
+    }
+    if ('+-*/^%'.includes(char)) {
+      const previous = tokens[tokens.length - 1];
+      tokens.push({
+        type: 'operator',
+        value:
+          char === '-' &&
+          (!previous || previous.type === 'operator' || previous.type === 'leftParen' || previous.type === 'function')
+            ? 'u-'
+            : char,
+      });
+      i += 1;
+      continue;
+    }
+    throw new Error('Unsupported input');
+  }
+  return tokens;
+}
+
+function toFallbackRpn(tokens) {
+  const output = [];
+  const stack = [];
+  tokens.forEach((token) => {
+    if (token.type === 'number') output.push(token);
+    else if (token.type === 'function' || token.type === 'leftParen') stack.push(token);
+    else if (token.type === 'operator') {
+      const op = FALLBACK_OPERATORS[token.value];
+      while (stack.length) {
+        const top = stack[stack.length - 1];
+        const topOp = FALLBACK_OPERATORS[top.value];
+        if (
+          top.type === 'function' ||
+          (top.type === 'operator' &&
+            (topOp.precedence > op.precedence ||
+              (topOp.precedence === op.precedence && op.associativity === 'left')))
+        ) {
+          output.push(stack.pop());
+        } else break;
+      }
+      stack.push(token);
+    } else if (token.type === 'rightParen') {
+      while (stack.length && stack[stack.length - 1].type !== 'leftParen') output.push(stack.pop());
+      if (!stack.length) throw new Error('Mismatched parentheses');
+      stack.pop();
+      if (stack[stack.length - 1]?.type === 'function') output.push(stack.pop());
+    }
+  });
+  while (stack.length) {
+    const token = stack.pop();
+    if (token.type === 'leftParen') throw new Error('Mismatched parentheses');
+    output.push(token);
+  }
+  return output;
+}
+
+function evaluateFallbackRpn(rpn, angleMode) {
+  const stack = [];
+  const radians = (value) => (angleMode === 'deg' ? (value * Math.PI) / 180 : value);
+  const displayAngle = (value) => (angleMode === 'deg' ? (value * 180) / Math.PI : value);
+  rpn.forEach((token) => {
+    if (token.type === 'number') {
+      stack.push(token.value);
+      return;
+    }
+    if (token.type === 'function') {
+      const value = stack.pop();
+      if (value == null) throw new Error('Missing value');
+      const results = {
+        sin: Math.sin(radians(value)),
+        cos: Math.cos(radians(value)),
+        tan: Math.tan(radians(value)),
+        asin: displayAngle(Math.asin(value)),
+        acos: displayAngle(Math.acos(value)),
+        atan: displayAngle(Math.atan(value)),
+        sinh: Math.sinh(value),
+        cosh: Math.cosh(value),
+        tanh: Math.tanh(value),
+        sec: 1 / Math.cos(radians(value)),
+        csc: 1 / Math.sin(radians(value)),
+        cot: 1 / Math.tan(radians(value)),
+        ln: Math.log(value),
+        log: Math.log10(value),
+        sqrt: Math.sqrt(value),
+        abs: Math.abs(value),
+        exp: Math.exp(value),
+      };
+      stack.push(results[token.value]);
+      return;
+    }
+    if (token.value === '%') {
+      const value = stack.pop();
+      if (value == null) throw new Error('Missing value');
+      stack.push(value / 100);
+      return;
+    }
+    if (token.value === 'u-') {
+      const value = stack.pop();
+      if (value == null) throw new Error('Missing value');
+      stack.push(-value);
+      return;
+    }
+    const right = stack.pop();
+    const left = stack.pop();
+    if (left == null || right == null) throw new Error('Missing value');
+    if (token.value === '+') stack.push(left + right);
+    if (token.value === '-') stack.push(left - right);
+    if (token.value === '*') stack.push(left * right);
+    if (token.value === '/') stack.push(left / right);
+    if (token.value === '^') stack.push(left ** right);
+  });
+  if (stack.length !== 1 || !Number.isFinite(stack[0])) throw new Error('Invalid calculation');
+  return stack[0];
+}
+
+function calculateFallback(input, angleMode) {
+  return evaluateFallbackRpn(toFallbackRpn(tokenizeFallback(input)), angleMode);
+}
+
+function formatFallback(value) {
+  if (Math.abs(value) >= 1e10 || (Math.abs(value) > 0 && Math.abs(value) < 1e-7)) {
+    return value.toExponential(8);
+  }
+  return String(Number(value.toPrecision(12)));
+}
+
+function FallbackCalculator() {
+  const [angleMode, setAngleMode] = useState('deg');
+  const [expression, setExpression] = useState('');
+  const [result, setResult] = useState('Ready');
+  const [error, setError] = useState('');
+
+  const appendValue = (value) => {
+    setExpression((current) => `${current}${value}`);
+    setError('');
+  };
+  const calculate = () => {
+    try {
+      const value = calculateFallback(expression, angleMode);
+      const formatted = formatFallback(value);
+      setExpression(formatted);
+      setResult(formatted);
+      setError('');
+    } catch (err) {
+      setError(err.message || 'Invalid calculation');
+    }
+  };
+  const handleCalculatorButton = (value) => {
+    if (value === '=') calculate();
+    else if (value === 'C') {
+      setExpression('');
+      setResult('Ready');
+      setError('');
+    } else if (value === 'DEL') setExpression((current) => current.slice(0, -1));
+    else if (value === '+/-') setExpression((current) => (current.startsWith('-') ? current.slice(1) : `-${current}`));
+    else if (value === 'ans') appendValue(result !== 'Ready' && !error ? result : '');
+    else appendValue(value);
+  };
+
+  return (
+    <div className="exam-fallback-calc">
+      <div className="exam-fallback-display">
+        <input
+          value={expression}
+          onChange={(e) => {
+            setExpression(e.target.value);
+            setError('');
+          }}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') calculate();
+          }}
+          placeholder="0"
+        />
+        <div className={`exam-fallback-result${error ? ' exam-fallback-result--error' : ''}`}>
+          {error || result}
+        </div>
+      </div>
+      <div className="exam-fallback-actions">
+        <button type="button" onClick={() => setAngleMode((mode) => (mode === 'deg' ? 'rad' : 'deg'))}>
+          {angleMode.toUpperCase()}
+        </button>
+        <button type="button" onClick={() => appendValue('e')}>e</button>
+        <button type="button" onClick={() => setExpression((current) => current.slice(0, -1))}>DEL</button>
+        <button
+          type="button"
+          onClick={() => {
+            setExpression('');
+            setResult('Ready');
+            setError('');
+          }}
+        >
+          AC
+        </button>
+      </div>
+      <div className="exam-fallback-keypad">
+        <div className="exam-fallback-grid exam-fallback-science">
+          {FALLBACK_FUNCTION_BUTTONS.flat().map((button) => {
+            const value = typeof button === 'string' ? button : button.value;
+            const label = typeof button === 'string' ? button : button.label;
+            return (
+              <button type="button" key={`${label}-${value}`} onClick={() => handleCalculatorButton(value)}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="exam-fallback-grid exam-fallback-number-pad">
+          {FALLBACK_NUMBER_BUTTONS.flat().map((value) => (
+            <button
+              type="button"
+              key={value}
+              className={value === '=' ? 'exam-fallback-equals' : undefined}
+              onClick={() => handleCalculatorButton(value)}
+            >
+              {value}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScientificCalculator({ allowed, open, onToggle }) {
+  if (!allowed) {
+    return (
+      <button type="button" className="exam-tool-btn" disabled title="Calculator disabled by lecturer">
+        <CalculatorIcon />
+        <span>Calculator off</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="exam-calculator-wrap">
+      <button
+        type="button"
+        className="exam-tool-btn"
+        onClick={onToggle}
+        aria-expanded={open}
+      >
+        <CalculatorIcon />
+        <span>{open ? 'Hide calculator' : 'Calculator'}</span>
+      </button>
+    </div>
+  );
+}
+
+function InPageCalculatorPanel({ onClose }) {
+  return (
+    <div className="exam-calculator-panel">
+      <div className="exam-calculator-header">
+        <span>Desmos scientific calculator</span>
+        <button
+          type="button"
+          className="exam-tool-icon-btn"
+          onClick={onClose}
+          aria-label="Close calculator"
+        >
+          x
+        </button>
+      </div>
+      <iframe
+        title="Desmos scientific calculator"
+        src="https://www.desmos.com/scientific"
+        className="exam-desmos-frame"
+        sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+      />
+    </div>
+  );
+}
+
+function ReadingControls({ fontScale, fontFamily, onFontScaleChange, onFontFamilyChange }) {
+  return (
+    <div className="exam-reading-controls" aria-label="Reading preferences">
+      <label>
+        <span>Text size</span>
+        <input
+          type="range"
+          min="0.95"
+          max="2.4"
+          step="0.05"
+          value={fontScale}
+          onChange={(e) => onFontScaleChange(Number(e.target.value))}
+        />
+        <output>{Math.round(fontScale * 100)}%</output>
+      </label>
+      <label>
+        <span>Font</span>
+        <select value={fontFamily} onChange={(e) => onFontFamilyChange(e.target.value)}>
+          {FONT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 }
 
@@ -64,6 +502,9 @@ export default function ExamPage() {
   const [showStrikeWarning, setShowStrikeWarning] = useState(false);
   const [strikeWarning, setStrikeWarning] = useState({ count: 0, message: '' });
   const [displayLocked, setDisplayLocked] = useState(false);
+  const [fontScale, setFontScale] = useState(1);
+  const [fontFamily, setFontFamily] = useState('system');
+  const [calculatorOpen, setCalculatorOpen] = useState(false);
 
   const checkDisplaySecurity = async () => {
     try {
@@ -322,7 +763,14 @@ export default function ExamPage() {
 
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
         handleStrike('Escape pressed during exam');
+        return;
+      }
+
+      if (FUNCTION_KEYS.has(e.key)) {
+        e.preventDefault();
+        e.stopPropagation();
         return;
       }
 
@@ -416,6 +864,10 @@ export default function ExamPage() {
     setProctoringReady(status.proctoringReady);
   }, []);
 
+  useEffect(() => {
+    setCalculatorOpen(Boolean(exam?.allowScientificCalculator));
+  }, [exam?.allowScientificCalculator]);
+
   if (phase === 'loading') {
     return (
       <div className="loading-screen">
@@ -450,6 +902,10 @@ export default function ExamPage() {
   const timePct = totalDuration > 0 ? Math.max(0, (remaining / totalDuration) * 100) : 0;
   const answeredCount = isExam ? countAnswered(answers, exam.questions) : 0;
   const visibleStrikes = Math.min(strikes, 3);
+  const readingStyle = {
+    '--exam-reading-scale': fontScale,
+    '--exam-reading-font': getReadingFont(fontFamily),
+  };
 
   return (
     <div className={`exam-shell${isExam ? ' exam-locked' : ''}`}>
@@ -577,7 +1033,10 @@ export default function ExamPage() {
               </span>
             </div>
 
-            <span className="badge badge-live">SECURED</span>
+            <div className="exam-topbar-actions">
+              <ThemeToggle />
+              <span className="badge badge-live">SECURED</span>
+            </div>
           </header>
 
           <div className="exam-security-strip">
@@ -595,6 +1054,9 @@ export default function ExamPage() {
             </span>
             <span className="exam-security-chip">
               <ShieldIcon /> External device watch
+            </span>
+            <span className="exam-security-chip">
+              <ShieldIcon /> Function keys blocked
             </span>
           </div>
 
@@ -714,18 +1176,39 @@ export default function ExamPage() {
             {isExam ? (
               <>
                 <div className="exam-question-row">
-                  <div className="exam-question-main glass-card exam-question-card">
+                  {exam.rules && (
+                    <aside className="exam-rules-card exam-rules-card--side">
+                      <h2>Exam rules</h2>
+                      <div className="exam-rules-content">{exam.rules}</div>
+                    </aside>
+                  )}
+
+                  <div className="exam-workspace">
+                  <div className="exam-question-main glass-card exam-question-card" style={readingStyle}>
                     <div className="exam-question-header">
+                      <div className="exam-question-tools">
+                        <ReadingControls
+                          fontScale={fontScale}
+                          fontFamily={fontFamily}
+                          onFontScaleChange={setFontScale}
+                          onFontFamilyChange={setFontFamily}
+                        />
+                        <ScientificCalculator
+                          allowed={Boolean(exam.allowScientificCalculator)}
+                          open={calculatorOpen}
+                          onToggle={() => setCalculatorOpen((open) => !open)}
+                        />
+                        <button
+                          type="button"
+                          className={`btn-flag${isFlagged(answers, currentQ) ? ' btn-flag--active' : ''}`}
+                          onClick={() => toggleFlag(currentQ)}
+                        >
+                          {isFlagged(answers, currentQ) ? 'Flagged' : 'Flag'}
+                        </button>
+                      </div>
                       <span className="exam-question-label">
                         Question {question.questionNumber ?? currentQ + 1} of {exam.questions.length}
                       </span>
-                      <button
-                        type="button"
-                        className={`btn-flag${isFlagged(answers, currentQ) ? ' btn-flag--active' : ''}`}
-                        onClick={() => toggleFlag(currentQ)}
-                      >
-                        {isFlagged(answers, currentQ) ? '★ Flagged' : '☆ Flag for review'}
-                      </button>
                     </div>
 
                     <h2 className="exam-question-text">{question.text}</h2>
@@ -759,7 +1242,8 @@ export default function ExamPage() {
                                 onChange={() => selectAnswer(currentQ, idx)}
                                 disabled={!proctoringReady}
                               />
-                              {opt}
+                              <span className="exam-option-letter">{String.fromCharCode(65 + idx)}</span>
+                              <span>{opt}</span>
                             </label>
                           );
                         })}
@@ -794,6 +1278,7 @@ export default function ExamPage() {
                         </button>
                       )}
                     </div>
+
                   </div>
 
                   <QuestionNavigator
@@ -803,14 +1288,15 @@ export default function ExamPage() {
                     questions={exam.questions}
                     onJump={setCurrentQ}
                   />
+
+                  {calculatorOpen && Boolean(exam.allowScientificCalculator) && (
+                    <section className="exam-calculator-section">
+                      <InPageCalculatorPanel onClose={() => setCalculatorOpen(false)} />
+                    </section>
+                  )}
+                  </div>
                 </div>
 
-                {exam.rules && (
-                  <section className="exam-rules-card">
-                    <h2>Exam rules</h2>
-                    <div className="exam-rules-content">{exam.rules}</div>
-                  </section>
-                )}
               </>
             ) : null}
           </div>

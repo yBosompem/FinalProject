@@ -78,12 +78,12 @@ function answerLine(line) {
 }
 
 function optionLine(line) {
-  return line.match(/^([A-D])[\).:\-]\s*(.+)$/i);
+  return line.match(/^([A-E])[\).:\-]\s*(.+)$/i);
 }
 
 function findOptionMarkers(text) {
   const markers = [];
-  const regex = /(?:option\s+)?([A-D])[\).:\-]\s+/gi;
+  const regex = /(?:option\s+)?([A-E])[\).:\-]\s+/gi;
   let match = regex.exec(text);
   while (match) {
     const before = text[match.index - 1] || ' ';
@@ -105,7 +105,7 @@ function parseInlineQuestion(body) {
   if (markers.length < 2) return null;
 
   const questionText = cleanText(body.slice(0, markers[0].index).replace(/\boption\s*$/i, ''));
-  const options = ['', '', '', ''];
+  const options = ['', '', '', '', ''];
 
   markers.forEach((marker, i) => {
     const next = markers[i + 1]?.index ?? body.length;
@@ -190,7 +190,7 @@ function parseStructuredQuestions(text) {
       current = {
         sourceNumber: Number(qMatch[1]),
         text: qMatch[2],
-        options: ['', '', '', ''],
+        options: ['', '', '', '', ''],
       };
       continue;
     }
@@ -217,17 +217,17 @@ function parseStructuredQuestions(text) {
 }
 
 /**
- * Resolve MCQ answer: letter (A-D), 0-based index, 1-based index (1-4), or option text.
+ * Resolve MCQ answer: letter (A-E), 0-based index, 1-based index (1-5), or option text.
  */
 export function resolveMcqAnswer(options, rawAnswer) {
   const ans = String(rawAnswer ?? '').trim();
   if (!ans) return null;
 
   const opts = (options || []).map((o) => String(o ?? '').trim());
-  const slotCount = Math.max(opts.length, 4);
+  const slotCount = Math.max(opts.length, 5);
   if (!opts.some((text) => text.length > 0)) return null;
 
-  if (/^[A-Da-d]$/.test(ans)) {
+  if (/^[A-Ea-e]$/.test(ans)) {
     const letterIndex = ans.toUpperCase().charCodeAt(0) - 65;
     return Math.max(0, Math.min(slotCount - 1, letterIndex));
   }
@@ -260,6 +260,7 @@ function detectQuestionsHeader(line) {
     else if (/^(optionb|choiceb|b)$/.test(col)) index.optionB = i;
     else if (/^(optionc|choicec|c)$/.test(col)) index.optionC = i;
     else if (/^(optiond|choiced|d)$/.test(col)) index.optionD = i;
+    else if (/^(optione|choicee|e)$/.test(col)) index.optionE = i;
     else if (/^(answer|correct|key|correctanswer)$/.test(col)) index.answer = i;
     else if (/^(marks|points|score|point)$/.test(col)) index.marks = i;
   });
@@ -273,9 +274,10 @@ function readOptionsFromRow(cols, header) {
       cols[header.optionB] ?? '',
       cols[header.optionC] ?? '',
       cols[header.optionD] ?? '',
+      cols[header.optionE] ?? '',
     ].map((o) => String(o).trim());
   }
-  return cols.slice(2, 6).map((o) => String(o).trim());
+  return cols.slice(2, 7).map((o) => String(o).trim());
 }
 
 function applyAnswerToQuestion(q, rawAnswer) {
@@ -304,8 +306,8 @@ function parseQuestionsFromCsv(text) {
       parseInt(stripBOM(cols[header?.number ?? 0] ?? ''), 10) || i - startRow + 1;
     const qText = cols[header?.question ?? 1] ?? '';
     const opts = readOptionsFromRow(cols, header);
-    const answerRaw = header?.answer != null ? cols[header.answer] : cols[6];
-    const marksRaw = header?.marks != null ? cols[header.marks] : null;
+    const answerRaw = header?.answer != null ? cols[header.answer] : (cols[7] ?? cols[6]);
+    const marksRaw = header?.marks != null ? cols[header.marks] : (cols[8] ?? null);
     const marks = marksRaw != null ? parseFloat(marksRaw) || 1 : 1;
     const nonEmptyOpts = opts.filter(Boolean);
 
@@ -397,7 +399,7 @@ export async function parseQuestionsUpload(file) {
 }
 
 /**
- * Questions CSV: number, question, optionA-D, optional answer
+ * Questions CSV: number, question, optionA-E, optional answer
  * Leave options empty for short-answer questions.
  */
 export const parseQuestionsFile = parseQuestionsFromText;
@@ -469,7 +471,7 @@ function parseCsvAnswerMap(text) {
 
 /**
  * Answers CSV/TXT/DOCX/PDF: number, answer or natural sectioned answer key.
- * MCQ: A/B/C/D, 0-3, 1-4, or matching option text. Short: exact text.
+ * MCQ: A/B/C/D/E, 0-4, 1-5, or matching option text. Short: exact text.
  */
 export function applyAnswerKey(questions, text) {
   const csvMap = looksLikeCsv(text) ? parseCsvAnswerMap(text) : null;
@@ -523,9 +525,9 @@ export async function applyAnswerKeyUpload(questions, file) {
   return applyAnswerKey(questions, await extractTextFromUpload(file));
 }
 
-export const QUESTIONS_CSV_TEMPLATE = `number,question,optionA,optionB,optionC,optionD,answer,marks
-1,What is 2+2?,2,3,4,5,C,2
-2,Capital of Ghana?,,,,,Accra,5
+export const QUESTIONS_CSV_TEMPLATE = `number,question,optionA,optionB,optionC,optionD,optionE,answer,marks
+1,What is 2+2?,2,3,4,5,,C,2
+2,Capital of Ghana?,,,,,,Accra,5
 `;
 
 export const ANSWERS_CSV_TEMPLATE = `number,answer

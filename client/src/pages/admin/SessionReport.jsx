@@ -46,6 +46,14 @@ const CHEAT_TYPES = new Set([
   'window_blur',
 ]);
 
+const ZERO_RISK_TYPES = new Set([
+  'face_verified',
+  'monitoring_started',
+  'screen_share_started',
+  'exam_submitted',
+  'recording_saved',
+]);
+
 export default function SessionReport() {
   const { sessionId } = useParams();
   const [report, setReport] = useState(null);
@@ -93,6 +101,8 @@ export default function SessionReport() {
   }
 
   const { session, events, riskScore } = report;
+  const examTypeLabel =
+    session.exam?.examType === 'end_of_semester' ? 'End of Semester Exam' : 'Midsemester Exam';
   const cheatEvents = events.filter((e) => CHEAT_TYPES.has(e.type));
   const summary = cheatEvents.reduce((acc, e) => {
     acc[e.type] = (acc[e.type] || 0) + 1;
@@ -113,6 +123,14 @@ export default function SessionReport() {
         <p className="page-sub">
           {session.student?.email} · {session.exam?.title}
         </p>
+
+        <div className="card" style={{ marginBottom: '1rem' }}>
+          <p style={{ margin: '0 0 0.35rem' }}>
+            <strong>Reference number:</strong> {session.student?.referenceNumber || 'Not provided'}
+          </p>
+          <strong>Index number:</strong> {session.student?.studentId || 'Not provided'} · <strong>Exam type:</strong>{' '}
+          {examTypeLabel}
+        </div>
 
         <div className="grid-2" style={{ marginBottom: '2rem' }}>
           <div className="card">
@@ -252,7 +270,7 @@ export default function SessionReport() {
                       </span>
                     </td>
                     <td>{ev.message}</td>
-                    <td>{ev.riskDelta > 0 ? `+${ev.riskDelta}` : '—'}</td>
+                    <td>{!ZERO_RISK_TYPES.has(ev.type) && ev.riskDelta > 0 ? `+${ev.riskDelta}` : '—'}</td>
                   </tr>
                 ))
               )}

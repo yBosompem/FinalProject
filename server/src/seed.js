@@ -21,7 +21,8 @@ async function seed() {
     email: 'student@university.edu',
     password: 'student123',
     role: 'student',
-    studentId: 'STU-2024-001',
+    studentId: '1234567',
+    referenceNumber: '12345678',
   });
 
   await Exam.create({

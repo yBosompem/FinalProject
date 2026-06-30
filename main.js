@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, desktopCapturer, session, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn, execFile } = require('child_process');
@@ -10,6 +10,7 @@ let isExamActive = false;
 let deviceBaseline = new Set();
 let devicePoller = null;
 let deviceBaselineReady = false;
+const FUNCTION_KEY_ACCELERATORS = Array.from({ length: 12 }, (_, i) => `F${i + 1}`);
 
 const SUSPICIOUS_DEVICE_CLASSES = new Set([
   'WPD',
@@ -161,6 +162,22 @@ function stopExternalDeviceMonitor() {
   deviceBaselineReady = false;
 }
 
+function blockFunctionKeys() {
+  FUNCTION_KEY_ACCELERATORS.forEach((accelerator) => {
+    if (!globalShortcut.isRegistered(accelerator)) {
+      globalShortcut.register(accelerator, () => {});
+    }
+  });
+}
+
+function unblockFunctionKeys() {
+  FUNCTION_KEY_ACCELERATORS.forEach((accelerator) => {
+    if (globalShortcut.isRegistered(accelerator)) {
+      globalShortcut.unregister(accelerator);
+    }
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -231,6 +248,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  unblockFunctionKeys();
   killServices();
 });
 
@@ -242,6 +260,7 @@ ipcMain.on('enter-exam-mode', () => {
     mainWindow.setKiosk(true);
     mainWindow.setAlwaysOnTop(true, 'screen-saver');
     mainWindow.setFullScreen(true);
+    blockFunctionKeys();
     
     // Lock focus: if window loses focus, force it back
     mainWindow.on('blur', forceFocus);
@@ -258,6 +277,7 @@ ipcMain.on('exit-exam-mode', () => {
     mainWindow.setFullScreen(false);
     mainWindow.off('blur', forceFocus);
   }
+  unblockFunctionKeys();
   stopExternalDeviceMonitor();
 });
 

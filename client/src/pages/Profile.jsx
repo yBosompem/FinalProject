@@ -33,7 +33,8 @@ export default function Profile() {
           <Detail label="Full name" value={user?.name} />
           <Detail label="Email" value={user?.email} />
           <Detail label="Role" value={user?.role === 'admin' ? 'Lecturer / Instructor' : 'Student'} />
-          {user?.role === 'student' && <Detail label="Index / Student number" value={user?.studentId} />}
+          {user?.role === 'student' && <Detail label="Index number" value={user?.studentId} />}
+          {user?.role === 'student' && <Detail label="Reference number" value={user?.referenceNumber} />}
           <Detail label="College" value={user?.college} />
           <Detail label="Faculty / School" value={user?.faculty} />
           <Detail label="Department" value={user?.department} />

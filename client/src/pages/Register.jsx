@@ -26,6 +26,7 @@ export default function Register() {
     password: '',
     role: 'student',
     studentId: '',
+    referenceNumber: '',
     college: '',
     faculty: '',
     department: '',
@@ -158,12 +159,35 @@ export default function Register() {
           {form.role === 'student' && (
             <>
               <div className="form-group">
-                <label className="label">Student ID (optional)</label>
+                <label className="label">Index number</label>
                 <input
                   className="input"
+                  maxLength={7}
                   value={form.studentId}
-                  onChange={(e) => setForm({ ...form, studentId: e.target.value })}
+                  onChange={(e) => setForm({ ...form, studentId: e.target.value.toUpperCase().slice(0, 7) })}
+                  required
                 />
+                <p style={{ marginTop: '0.35rem', color: 'var(--muted)', fontSize: '0.8rem' }}>
+                  Required and unique. Maximum 7 characters.
+                </p>
+              </div>
+
+              <div className="form-group">
+                <label className="label">Reference number</label>
+                <input
+                  className="input"
+                  inputMode="numeric"
+                  maxLength={8}
+                  pattern="\d{8}"
+                  value={form.referenceNumber}
+                  onChange={(e) =>
+                    setForm({ ...form, referenceNumber: e.target.value.replace(/\D/g, '').slice(0, 8) })
+                  }
+                  required
+                />
+                <p style={{ marginTop: '0.35rem', color: 'var(--muted)', fontSize: '0.8rem' }}>
+                  Required and unique. Must be exactly 8 digits.
+                </p>
               </div>
 
               <div className="form-group">

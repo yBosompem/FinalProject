@@ -150,8 +150,7 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* Tab Navigation */}
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
+        <div className="student-dashboard-tabs">
           <button
             className={`btn ${activeTab === 'available' ? 'btn-primary' : 'btn-ghost'}`}
             style={{ fontSize: '0.95rem' }}
@@ -170,54 +169,54 @@ export default function StudentDashboard() {
 
         {/* Tab Content */}
         {activeTab === 'available' && (
-          <section>
+          <section className="student-exam-list">
             {exams.length === 0 ? (
-              <p style={{ color: 'var(--muted)' }}>No published exams yet.</p>
+              <p className="empty-state">No published exams yet.</p>
             ) : (
               exams.map((exam) => {
                 const attempt = getAttemptState(exam._id, sessions);
                 const availability = getAvailabilityState(exam, now);
                 return (
-                  <div key={exam._id} className="card" style={{ marginBottom: '1rem' }}>
-                    <h3>{exam.title}</h3>
-                    <p style={{ color: 'var(--muted)', fontSize: '0.9rem', margin: '0.5rem 0' }}>
-                      {exam.durationMinutes} minutes - {exam.questionCount ?? exam.questions?.length ?? 0} questions
-                    </p>
-                    {availability.detail && (
-                      <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
-                        {availability.detail}
-                      </p>
-                    )}
-                    <p style={{ fontSize: '0.85rem', marginBottom: '1rem' }}>{exam.description}</p>
-                    {attempt.type === 'completed' ? (
-                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                        <span className="badge badge-success">Completed</span>
-                        {attempt.session?.exam?.showResultsToStudents ? (
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                            onClick={() => viewResults(attempt.session._id)}
-                          >
-                            View results
-                          </button>
-                        ) : (
-                          <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>Results hidden</span>
-                        )}
+                  <div key={exam._id} className="card student-exam-card">
+                    <div className="student-exam-main">
+                      <h3>{exam.title}</h3>
+                      <div className="student-exam-meta">
+                        <span>{exam.durationMinutes} minutes</span>
+                        <span>{exam.questionCount ?? exam.questions?.length ?? 0} questions</span>
+                        {availability.detail && <span>{availability.detail}</span>}
                       </div>
-                    ) : attempt.type === 'resume' ? (
-                      <Link to={`/student/exam/${exam._id}`} className="btn btn-primary">
-                        Resume exam
-                      </Link>
-                    ) : availability.type === 'available' ? (
-                      <Link to={`/student/exam/${exam._id}`} className="btn btn-primary">
-                        Start exam
-                      </Link>
-                    ) : (
-                      <button type="button" className="btn btn-ghost" disabled>
-                        {availability.label}
-                      </button>
-                    )}
+                      {exam.description && <p className="student-exam-description">{exam.description}</p>}
+                    </div>
+                    <div className="student-exam-action">
+                      {attempt.type === 'completed' ? (
+                        <>
+                          <span className="badge badge-success">Completed</span>
+                          {attempt.session?.exam?.showResultsToStudents ? (
+                            <button
+                              type="button"
+                              className="btn btn-ghost student-exam-small-action"
+                              onClick={() => viewResults(attempt.session._id)}
+                            >
+                              View results
+                            </button>
+                          ) : (
+                            <span className="student-exam-muted">Results hidden</span>
+                          )}
+                        </>
+                      ) : attempt.type === 'resume' ? (
+                        <Link to={`/student/exam/${exam._id}`} className="btn btn-primary">
+                          Resume exam
+                        </Link>
+                      ) : availability.type === 'available' ? (
+                        <Link to={`/student/exam/${exam._id}`} className="btn btn-primary">
+                          Start exam
+                        </Link>
+                      ) : (
+                        <button type="button" className="btn btn-ghost" disabled>
+                          {availability.label}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })

@@ -260,17 +260,20 @@ def _spoof_event(
     return None
 
 
+PHONE_LABELS = {'cell phone', 'mobile phone', 'phone'}
+
+
 def _object_events(session_id: str, frame: np.ndarray, face_count: int) -> list[dict[str, Any]]:
-    objects = detect_objects(frame)
+    objects = detect_objects(frame, confidence_threshold=0.35)
     detections: list[dict[str, Any]] = []
     if not objects:
         return detections
 
-    persons = [obj for obj in objects if obj['label'] == 'person']
+    persons = [obj for obj in objects if obj['label'] == 'person' and obj.get('confidence', 0) >= 0.55]
     phones = [
         obj
         for obj in objects
-        if obj['label'] == 'cell phone' and obj.get('confidence', 0) >= 0.7
+        if obj['label'] in PHONE_LABELS and obj.get('confidence', 0) >= 0.45
     ]
     suspicious = [
         obj
@@ -284,18 +287,21 @@ def _object_events(session_id: str, frame: np.ndarray, face_count: int) -> list[
     object_streaks['suspicious'] = object_streaks.get('suspicious', 0) + 1 if suspicious else 0
     object_streaks['persons'] = object_streaks.get('persons', 0) + 1 if len(persons) > 1 else 0
 
-    if phones and object_streaks['phone'] >= 3 and _cooldown_ok(session_id, 'phone_detected', 18):
-        best = max(phones, key=lambda obj: obj['confidence'])
+    best_phone = max(phones, key=lambda obj: obj['confidence']) if phones else None
+    strong_phone = bool(best_phone and best_phone.get('confidence', 0) >= 0.78)
+    if phones and (object_streaks['phone'] >= 2 or strong_phone) and _cooldown_ok(session_id, 'phone_detected', 18):
         detections.append({
             'type': 'phone_detected',
             'triggered': True,
             'severity': 'high',
-            'message': 'Mobile phone detected across multiple frames',
+            'message': 'Mobile phone detected by object model',
             'risk_delta': 28,
             'metadata': {
                 'source': 'tflite_coco',
-                'object': best,
+                'object': best_phone,
+                'phone_candidates': phones[:5],
                 'evidence_frames': object_streaks['phone'],
+                'strong_single_frame': strong_phone,
                 'review_required': True,
             },
         })

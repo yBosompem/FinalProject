@@ -3,7 +3,7 @@ const Exam = require('../models/Exam');
 const ExamSession = require('../models/ExamSession');
 const MonitoringEvent = require('../models/MonitoringEvent');
 const { authenticate, requireRole } = require('../middleware/auth');
-const { computeRiskScore, shouldFlag } = require('../services/riskScore');
+const { computeRiskScore, effectiveRiskDelta, shouldFlag } = require('../services/riskScore');
 const { finalizeSession } = require('../services/finalizeSession');
 const { getAdminExamIds, assertAdminOwnsSession, assertAdminOwnsExam } = require('../utils/adminScope');
 const { getExamAvailability, assertExamAvailable } = require('../utils/examAvailability');
@@ -50,10 +50,10 @@ router.get('/', async (req, res) => {
     } else {
       filter = { student: req.user._id };
     }
-    const examFields = 'title durationMinutes showResultsToStudents';
+    const examFields = 'title durationMinutes showResultsToStudents examType';
     const sessions = await ExamSession.find(filter)
       .populate('exam', examFields)
-      .populate('student', 'name email studentId college faculty department level')
+      .populate('student', 'name email studentId referenceNumber college faculty department level')
       .sort({ createdAt: -1 });
 
     if (req.user.role === 'student') {
@@ -91,7 +91,7 @@ router.get('/active', requireRole('admin'), async (req, res) => {
       exam: { $in: examIds },
     })
       .populate('exam', 'title')
-      .populate('student', 'name email studentId college faculty department level')
+      .populate('student', 'name email studentId referenceNumber college faculty department level')
       .sort({ startedAt: -1 });
     res.json(sessions);
   } catch (err) {
@@ -105,13 +105,14 @@ router.get('/by-exam/:examId', requireRole('admin'), async (req, res) => {
     if (!exam) return res.status(403).json({ message: 'You can only view your own exams' });
 
     const sessions = await ExamSession.find({ exam: exam._id })
-      .populate('student', 'name email studentId college faculty department level')
+      .populate('student', 'name email studentId referenceNumber college faculty department level')
       .sort({ submittedAt: -1, createdAt: -1 });
 
     res.json({
       exam: {
         _id: exam._id,
         title: exam.title,
+        examType: exam.examType,
         showResultsToStudents: exam.showResultsToStudents,
         maxGradePoints: exam.maxGradePoints,
       },
@@ -175,7 +176,7 @@ router.get('/:id', async (req, res) => {
   try {
     const session = await ExamSession.findById(req.params.id)
       .populate('exam')
-      .populate('student', 'name email studentId college faculty department level');
+      .populate('student', 'name email studentId referenceNumber college faculty department level');
     if (!session) return res.status(404).json({ message: 'Session not found' });
 
     if (req.user.role === 'student') {
@@ -344,8 +345,8 @@ router.post('/:id/submit', requireRole('student'), async (req, res) => {
 router.get('/:id/results', requireRole('student'), async (req, res) => {
   try {
     const session = await ExamSession.findById(req.params.id)
-      .populate('exam', 'title showResultsToStudents')
-      .populate('student', 'name email college faculty department level');
+      .populate('exam', 'title showResultsToStudents examType')
+      .populate('student', 'name email studentId referenceNumber college faculty department level');
 
     const studentId = session.student._id?.toString() || session.student.toString();
     if (!session || studentId !== req.user._id.toString()) {
@@ -375,8 +376,8 @@ router.get('/:id/results', requireRole('student'), async (req, res) => {
 router.get('/:id/report', requireRole('admin'), async (req, res) => {
   try {
     const session = await ExamSession.findById(req.params.id)
-      .populate('exam', 'title durationMinutes createdBy maxGradePoints')
-      .populate('student', 'name email studentId college faculty department level');
+      .populate('exam', 'title durationMinutes createdBy maxGradePoints examType')
+      .populate('student', 'name email studentId referenceNumber college faculty department level');
     if (!session) return res.status(404).json({ message: 'Session not found' });
 
     if (!(await assertAdminOwnsSession(req.user._id, session))) {
@@ -387,11 +388,16 @@ router.get('/:id/report', requireRole('admin'), async (req, res) => {
       createdAt: 1,
     });
     const riskScore = computeRiskScore(events);
+    const normalizedEvents = events.map((event) => ({
+      ...event.toObject(),
+      riskDelta: effectiveRiskDelta(event),
+    }));
     session.riskScore = riskScore;
-    session.isFlagged = shouldFlag(riskScore, events.filter((e) => e.riskDelta > 0).length);
+    session.alertCount = normalizedEvents.filter((e) => e.riskDelta > 0).length;
+    session.isFlagged = shouldFlag(riskScore, session.alertCount);
     await session.save();
 
-    res.json({ session, events, riskScore });
+    res.json({ session, events: normalizedEvents, riskScore });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

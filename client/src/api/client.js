@@ -26,6 +26,8 @@ export const api = {
   getExam: (id) => request(`/exams/${id}`),
   createExam: (body) => request('/exams', { method: 'POST', body: JSON.stringify(body) }),
   updateExam: (id, body) => request(`/exams/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  updateExamSettings: (id, body) =>
+    request(`/exams/${id}/settings`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteExam: (id) => request(`/exams/${id}`, { method: 'DELETE' }),
   getExamAttemptStatus: (examId) => request(`/sessions/exam/${examId}/status`),
   startSession: (examId) => request(`/sessions/start/${examId}`, { method: 'POST' }),
