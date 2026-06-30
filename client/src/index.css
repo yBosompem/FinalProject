@@ -596,7 +596,7 @@ textarea {
 
 .exam-question-row {
   display: grid;
-  grid-template-columns: minmax(300px, 0.25fr) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 0.22fr) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
@@ -604,7 +604,7 @@ textarea {
 .exam-workspace {
   grid-column: 2;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 390px;
+  grid-template-columns: minmax(0, 1fr) clamp(420px, 33vw, 520px);
   grid-template-rows: auto max-content;
   gap: 1rem;
   align-items: start;
@@ -616,7 +616,7 @@ textarea {
 }
 
 .exam-question-card {
-  padding: 1.5rem;
+  padding: 1.35rem;
 }
 
 .exam-question-header {
@@ -1042,7 +1042,7 @@ textarea {
   grid-column: 2;
   grid-row: 1;
   width: 100%;
-  padding: 1rem;
+  padding: 1rem 0.95rem 0.9rem;
   background: var(--surface);
   backdrop-filter: var(--glass);
   -webkit-backdrop-filter: var(--glass);
@@ -1058,25 +1058,28 @@ textarea {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.7rem;
   font-weight: 600;
 }
 
 .question-nav-grid {
   display: grid;
-  grid-template-columns: repeat(var(--question-nav-columns, 10), minmax(0, 1fr));
-  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 0.45rem;
+  align-items: center;
 }
 
 .question-nav-btn {
   width: 100%;
   aspect-ratio: 1;
-  min-height: 34px;
+  min-height: 32px;
   min-width: 0;
-  border-radius: 10px;
+  border-radius: 9px;
   border: 1px solid var(--border);
   font-weight: 700;
-  font-size: 0.875rem;
+  font-size: 0.78rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
   color: var(--text);
   transition:
@@ -1097,8 +1100,9 @@ textarea {
 }
 
 .question-nav-btn--current {
-  box-shadow: 0 0 0 2px var(--primary);
+  box-shadow: 0 0 0 2px var(--primary), 0 6px 16px rgba(10, 132, 255, 0.26);
   border-color: var(--primary) !important;
+  background: rgba(10, 132, 255, 0.22);
 }
 
 .question-nav-btn--answered {
@@ -1174,7 +1178,7 @@ textarea {
   }
 
   .question-nav-grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
   }
 
   .exam-topbar {

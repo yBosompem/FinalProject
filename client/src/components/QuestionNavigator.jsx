@@ -31,12 +31,10 @@ function navButtonClass(index, currentQ, answers, questions) {
 }
 
 export default function QuestionNavigator({ total, currentQ, answers, questions, onJump }) {
-  const columns = total > 100 ? Math.min(24, Math.ceil(Math.sqrt(total))) : 10;
-
   return (
     <aside className="question-nav">
       <p className="question-nav-title">Questions</p>
-      <div className="question-nav-grid" style={{ '--question-nav-columns': columns }}>
+      <div className="question-nav-grid">
         {Array.from({ length: total }, (_, i) => {
           const num = questions?.[i]?.questionNumber ?? i + 1;
           const questionIndex = questions?.[i]?.originalIndex ?? i;
