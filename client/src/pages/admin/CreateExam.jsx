@@ -45,6 +45,7 @@ export default function CreateExam() {
   const [rules, setRules] = useState('Keep your face visible. Do not leave the frame.');
   const [showResultsToStudents, setShowResultsToStudents] = useState(false);
   const [allowScientificCalculator, setAllowScientificCalculator] = useState(false);
+  const [shuffleQuestions, setShuffleQuestions] = useState(false);
   const calculatorTouchedRef = useRef(false);
   const [availableFrom, setAvailableFrom] = useState('');
   const [availableUntil, setAvailableUntil] = useState('');
@@ -77,6 +78,7 @@ export default function CreateExam() {
         if (!calculatorTouchedRef.current) {
           setAllowScientificCalculator(Boolean(exam.allowScientificCalculator));
         }
+        setShuffleQuestions(Boolean(exam.shuffleQuestions));
         setAvailableFrom(exam.availableFrom ? String(exam.availableFrom).slice(0, 16) : '');
         setAvailableUntil(exam.availableUntil ? String(exam.availableUntil).slice(0, 16) : '');
         setTargetCollege(exam.targetCollege || '');
@@ -310,17 +312,21 @@ export default function CreateExam() {
         isPublished: isEditMode ? isPublished : true,
         showResultsToStudents,
         allowScientificCalculator,
+        shuffleQuestions,
       };
       let savedExam;
       if (isEditMode) {
         savedExam = await api.updateExam(examId, payload);
-        savedExam = await api.updateExamSettings(examId, { allowScientificCalculator });
+        savedExam = await api.updateExamSettings(examId, { allowScientificCalculator, shuffleQuestions });
       } else {
         savedExam = await api.createExam(payload);
       }
       if (Boolean(savedExam.allowScientificCalculator) !== Boolean(allowScientificCalculator)) {
         setAllowScientificCalculator(Boolean(allowScientificCalculator));
         throw new Error('Calculator permission was not saved by the server. Restart the backend/Electron app and save again.');
+      }
+      if (Boolean(savedExam.shuffleQuestions) !== Boolean(shuffleQuestions)) {
+        throw new Error('Question shuffle permission was not saved by the server. Restart the backend/Electron app and save again.');
       }
       navigate('/admin');
     } catch (err) {
@@ -477,6 +483,14 @@ export default function CreateExam() {
                   }}
                 />
                 Allow scientific calculator during the exam
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '0.75rem' }}>
+                <input
+                  type="checkbox"
+                  checked={shuffleQuestions}
+                  onChange={(e) => setShuffleQuestions(e.target.checked)}
+                />
+                Shuffle question order differently for each student
               </label>
               <div className="card" style={{ background: 'var(--surface2)', marginTop: '1.25rem' }}>
                 <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem' }}>Student routing</h3>

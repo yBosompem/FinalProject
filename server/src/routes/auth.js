@@ -93,4 +93,38 @@ router.get('/me', authenticate, (req, res) => {
   res.json({ user: req.user });
 });
 
+router.patch('/me/reference-number', authenticate, async (req, res) => {
+  try {
+    if (req.user.role !== 'student') {
+      return res.status(403).json({ message: 'Only students can update a reference number.' });
+    }
+
+    const referenceNumber = String(req.body.referenceNumber || '').trim();
+    if (!/^\d{8}$/.test(referenceNumber)) {
+      return res.status(400).json({ message: 'Reference number must be exactly 8 digits' });
+    }
+
+    const referenceExists = await User.findOne({
+      role: 'student',
+      referenceNumber,
+      _id: { $ne: req.user._id },
+    });
+    if (referenceExists) {
+      return res.status(409).json({ message: 'This reference number is already registered.' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { referenceNumber },
+      { new: true, runValidators: true }
+    );
+    res.json({ user });
+  } catch (err) {
+    if (err.code === 11000 && err.keyPattern?.referenceNumber) {
+      return res.status(409).json({ message: 'This reference number is already registered.' });
+    }
+    res.status(500).json({ message: err.message });
+  }
+});
+
 module.exports = router;

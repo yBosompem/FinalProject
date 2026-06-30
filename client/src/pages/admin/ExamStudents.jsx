@@ -51,7 +51,6 @@ export default function ExamStudents() {
     );
   }
 
-  const completed = data.sessions.filter((s) => ['submitted', 'expired'].includes(s.status));
   const sessionGrade = (s) =>
     s?.reportReady && s.scaledScore != null ? Number(s.scaledScore) : '---';
   const sessionRaw = (s) =>
@@ -59,40 +58,63 @@ export default function ExamStudents() {
       ? `${s.correctCount} / ${s.totalQuestions ?? s.exam?.questionCount ?? '---'}`
       : '---';
   const numericGrade = (s) => (s?.reportReady && Number.isFinite(Number(s.scaledScore)) ? Number(s.scaledScore) : 0);
+  const extractCourseCode = (title) => {
+    const compact = String(title || '').replace(/\s+/g, '').toUpperCase();
+    return compact.match(/[A-Z]{2,}\d{3,4}[A-Z]?/)?.[0] || '';
+  };
   const normalizeCourseTitle = (title) =>
     String(title || '')
       .toLowerCase()
       .replace(/\b(midsemester|midsem|midterm|end\s*of\s*semester|semester|exam|examination)\b/g, '')
       .replace(/[^a-z0-9]+/g, ' ')
       .trim();
-  const courseKey = normalizeCourseTitle(data.exam.title);
+  const currentCourseCode = extractCourseCode(data.exam.title);
+  const courseKey = currentCourseCode || normalizeCourseTitle(data.exam.title);
+  const sessionCourseKey = (s) => extractCourseCode(s.exam?.title) || normalizeCourseTitle(s.exam?.title);
   const sessionStudentKey = (s) => s.student?.studentId || s.student?._id || s.student?.email || '';
   const relatedCompletedSessions = allSessions.filter(
     (s) =>
       ['submitted', 'expired'].includes(s.status) &&
-      normalizeCourseTitle(s.exam?.title) === courseKey
+      sessionCourseKey(s) === courseKey
   );
+  const latestByType = (sessions, type) =>
+    sessions
+      .filter((s) => s.exam?.examType === type)
+      .sort((a, b) => new Date(b.submittedAt || b.updatedAt || b.createdAt || 0) - new Date(a.submittedAt || a.updatedAt || a.createdAt || 0))[0];
   const findRelatedScore = (studentKey, type) =>
-    relatedCompletedSessions.find(
-      (s) => sessionStudentKey(s) === studentKey && s.exam?.examType === type
-    );
+    latestByType(relatedCompletedSessions.filter((s) => sessionStudentKey(s) === studentKey), type);
   const finalGrade = (studentKey) => {
     const mid = findRelatedScore(studentKey, 'midsemester');
     const end = findRelatedScore(studentKey, 'end_of_semester');
     if (!mid?.reportReady && !end?.reportReady) return '---';
     return Number((numericGrade(mid) + numericGrade(end)).toFixed(2));
   };
+  const courseRows = Object.values(
+    relatedCompletedSessions.reduce((acc, session) => {
+      const key = sessionStudentKey(session);
+      if (!key) return acc;
+      const existing = acc[key];
+      if (
+        !existing ||
+        new Date(session.submittedAt || session.updatedAt || session.createdAt || 0) >
+          new Date(existing.submittedAt || existing.updatedAt || existing.createdAt || 0)
+      ) {
+        acc[key] = session;
+      }
+      return acc;
+    }, {})
+  );
   const optionValues = (field) =>
     Array.from(
       new Set(
-        data.sessions
+        courseRows
           .map((s) => s.student?.[field])
           .filter((value) => value != null && String(value).trim() !== '')
           .map(String)
       )
     ).sort((a, b) => a.localeCompare(b));
 
-  const filteredSessions = completed
+  const filteredSessions = courseRows
     .filter((s) => {
       const student = s.student || {};
       return (
@@ -270,7 +292,7 @@ export default function ExamStudents() {
               Clear filters
             </button>
             <span style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
-              {filteredSessions.length} completed student(s)
+              {filteredSessions.length} completed student row(s)
             </span>
           </div>
         </div>
@@ -288,7 +310,7 @@ export default function ExamStudents() {
                 <span className="badge badge-info">{group.faculty}</span>
                 <span className="badge badge-info">Level {group.level}</span>
                 <span style={{ color: 'var(--muted)', fontSize: '0.85rem' }}>
-                  {group.sessions.length} session(s)
+                  {group.sessions.length} student row(s)
                 </span>
               </div>
               <div className="card print-only" style={{ padding: 0, overflow: 'hidden', marginBottom: '1rem' }}>
@@ -339,7 +361,7 @@ export default function ExamStudents() {
         )}
 
         <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: 'var(--muted)' }}>
-          Showing {filteredSessions.length} of {completed.length} completed session(s)
+          Showing {filteredSessions.length} of {courseRows.length} completed student row(s)
         </p>
       </div>
     </Layout>

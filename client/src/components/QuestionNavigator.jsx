@@ -12,18 +12,20 @@ function isFlagged(answers, index) {
 }
 
 function isAnsweredForQuestion(answers, index, questions) {
-  const a = getAnswer(answers, index);
   const q = questions?.[index];
+  const questionIndex = q?.originalIndex ?? index;
+  const a = getAnswer(answers, questionIndex);
   if ((q?.type || 'mcq') === 'short') {
     return Boolean(a?.textAnswer?.trim());
   }
-  return isAnswered(answers, index);
+  return isAnswered(answers, questionIndex);
 }
 
 function navButtonClass(index, currentQ, answers, questions) {
   const classes = ['question-nav-btn'];
+  const questionIndex = questions?.[index]?.originalIndex ?? index;
   if (index === currentQ) classes.push('question-nav-btn--current');
-  if (isFlagged(answers, index)) classes.push('question-nav-btn--flagged');
+  if (isFlagged(answers, questionIndex)) classes.push('question-nav-btn--flagged');
   else if (isAnsweredForQuestion(answers, index, questions)) classes.push('question-nav-btn--answered');
   return classes.join(' ');
 }
@@ -37,6 +39,7 @@ export default function QuestionNavigator({ total, currentQ, answers, questions,
       <div className="question-nav-grid" style={{ '--question-nav-columns': columns }}>
         {Array.from({ length: total }, (_, i) => {
           const num = questions?.[i]?.questionNumber ?? i + 1;
+          const questionIndex = questions?.[i]?.originalIndex ?? i;
           const answered = isAnsweredForQuestion(answers, i, questions);
           return (
             <button
@@ -45,7 +48,7 @@ export default function QuestionNavigator({ total, currentQ, answers, questions,
               className={navButtonClass(i, currentQ, answers, questions)}
               onClick={() => onJump(i)}
               title={
-                isFlagged(answers, i)
+                isFlagged(answers, questionIndex)
                   ? `Question ${num} — flagged`
                   : answered
                     ? `Question ${num} — answered`

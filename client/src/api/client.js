@@ -22,6 +22,11 @@ export const api = {
   login: (body) => request('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   register: (body) => request('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
   me: () => request('/auth/me'),
+  updateReferenceNumber: (referenceNumber) =>
+    request('/auth/me/reference-number', {
+      method: 'PATCH',
+      body: JSON.stringify({ referenceNumber }),
+    }),
   getExams: () => request('/exams'),
   getExam: (id) => request(`/exams/${id}`),
   createExam: (body) => request('/exams', { method: 'POST', body: JSON.stringify(body) }),

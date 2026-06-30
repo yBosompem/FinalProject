@@ -41,6 +41,51 @@ function examMatchesStudent(exam, user) {
   );
 }
 
+function shuffleOrder(length) {
+  const order = Array.from({ length }, (_, i) => i);
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
+}
+
+function getSessionQuestionOrder(exam, session) {
+  const total = exam?.questions?.length || 0;
+  const savedOrder = Array.isArray(session?.questionOrder) ? session.questionOrder : [];
+  const validSavedOrder =
+    savedOrder.length === total &&
+    new Set(savedOrder).size === total &&
+    savedOrder.every((index) => Number.isInteger(index) && index >= 0 && index < total);
+  if (validSavedOrder) return savedOrder;
+  return Array.from({ length: total }, (_, i) => i);
+}
+
+function studentExamPayload(exam, session) {
+  const obj = exam.toObject ? exam.toObject() : { ...exam };
+  const order = getSessionQuestionOrder(obj, session);
+  obj.questions = order.map((originalIndex, displayIndex) => {
+    const q = obj.questions[originalIndex] || {};
+    return {
+      originalIndex,
+      questionNumber: displayIndex + 1,
+      text: q.text,
+      type: q.type || 'mcq',
+      options: q.options || [],
+    };
+  });
+  obj.shuffleQuestions = Boolean(obj.shuffleQuestions);
+  return obj;
+}
+
+function sanitizeStudentSession(session) {
+  const obj = session.toObject ? session.toObject() : { ...session };
+  if (obj.exam?.questions) {
+    obj.exam = studentExamPayload(obj.exam, obj);
+  }
+  return obj;
+}
+
 router.get('/', async (req, res) => {
   try {
     let filter;
@@ -151,10 +196,11 @@ router.get('/exam/:examId/status', requireRole('student'), async (req, res) => {
 
     const currentSession = await finalizeIfExpired(session);
     if (currentSession.status === 'in_progress') {
+      await currentSession.populate('exam');
       return res.json({
         canStart: true,
         canResume: true,
-        session: currentSession,
+        session: sanitizeStudentSession(currentSession),
         availabilityStatus: availability.status,
         availableFrom: availability.startsAt,
         availableUntil: availability.endsAt,
@@ -232,14 +278,19 @@ router.post('/start/:examId', requireRole('student'), async (req, res) => {
           message: 'This exam attempt has ended and cannot be resumed.',
         });
       }
-      return res.json(currentSession);
+      await currentSession.populate('exam');
+      return res.json(sanitizeStudentSession(currentSession));
     }
 
     const endsAt = new Date(Date.now() + exam.durationMinutes * 60 * 1000);
+    const questionOrder = exam.shuffleQuestions
+      ? shuffleOrder(exam.questions.length)
+      : Array.from({ length: exam.questions.length }, (_, i) => i);
     const session = await ExamSession.create({
       exam: exam._id,
       student: req.user._id,
       endsAt,
+      questionOrder,
       answers: exam.questions.map((_, i) => ({
         questionIndex: i,
         selectedIndex: null,
@@ -257,7 +308,7 @@ router.post('/start/:examId', requireRole('student'), async (req, res) => {
     });
 
     const populated = await session.populate('exam');
-    res.status(201).json(populated);
+    res.status(201).json(sanitizeStudentSession(populated));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -289,6 +340,10 @@ router.patch('/:id/answers', requireRole('student'), async (req, res) => {
       session.answers = answers;
       await session.save();
     }
+    if (req.user.role === 'student') {
+      return res.json(sanitizeStudentSession(session));
+    }
+
     res.json(session);
   } catch (err) {
     res.status(500).json({ message: err.message });

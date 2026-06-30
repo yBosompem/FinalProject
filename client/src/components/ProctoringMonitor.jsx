@@ -65,12 +65,20 @@ const STOP_WORDS = new Set([
   'would',
 ]);
 
+const OPTION_LETTER_WORDS = {
+  a: ['a', 'ay'],
+  b: ['b', 'be', 'bee'],
+  c: ['c', 'see', 'sea'],
+  d: ['d', 'dee'],
+  e: ['e'],
+};
+
 function tokenizeSpeech(text) {
   return String(text || '')
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter((word) => word.length >= 4 && !STOP_WORDS.has(word));
+    .filter((word) => ((/^\d+$/.test(word) && word.length >= 2) || word.length >= 4) && !STOP_WORDS.has(word));
 }
 
 function buildExamKeywords(examContext) {
@@ -87,6 +95,43 @@ function buildExamKeywords(examContext) {
       .filter(([, count]) => count <= 4)
       .map(([word]) => word)
   );
+}
+
+function buildExamOptionLetters(examContext) {
+  const maxOptions = Math.min(
+    5,
+    Math.max(0, ...(examContext?.questions || []).map((q) => (q.options || []).length))
+  );
+  return ['a', 'b', 'c', 'd', 'e'].slice(0, maxOptions);
+}
+
+function detectOptionLetterMatches(transcript, optionLetters) {
+  const normalized = String(transcript || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized || !optionLetters?.length) return [];
+
+  const tokens = normalized.split(' ').filter(Boolean);
+  const matches = new Set();
+  const cues = '(answer|option|letter|choose|choosing|selected|select|pick|picked|mark|marked)';
+  const suffix = '(answer|option)';
+
+  optionLetters.forEach((letter) => {
+    const variants = OPTION_LETTER_WORDS[letter] || [letter];
+    const variantPattern = variants.join('|');
+    const cuedBefore = new RegExp(`\\b${cues}\\s+(is\\s+)?(${variantPattern})\\b`, 'i');
+    const cuedAfter = new RegExp(`\\b(${variantPattern})\\s+(is\\s+)?(the\\s+)?${suffix}\\b`, 'i');
+    const shortStandalone =
+      tokens.length <= 3 && tokens.some((token) => variants.includes(token));
+
+    if (cuedBefore.test(normalized) || cuedAfter.test(normalized) || shortStandalone) {
+      matches.add(`option ${letter.toUpperCase()}`);
+    }
+  });
+
+  return [...matches];
 }
 
 function StatusDot({ status }) {
@@ -176,6 +221,7 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
   const voiceStreakRef = useRef(0);
   const recognitionRef = useRef(null);
   const speechKeywordsRef = useRef(new Set());
+  const speechOptionLettersRef = useRef([]);
   const speechAlertCooldownRef = useRef(0);
   const speechRestartTimerRef = useRef(null);
 
@@ -284,6 +330,7 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
 
   useEffect(() => {
     speechKeywordsRef.current = buildExamKeywords(examContext);
+    speechOptionLettersRef.current = buildExamOptionLetters(examContext);
   }, [examContext]);
 
   const handleSpeechTranscript = useCallback(
@@ -291,20 +338,26 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
       if (!active || !sessionId) return;
       const words = tokenizeSpeech(transcript);
       const keywords = speechKeywordsRef.current;
-      if (!words.length || keywords.size === 0) return;
+      const keywordMatches = keywords.size
+        ? [...new Set(words.filter((word) => keywords.has(word)))]
+        : [];
+      const optionMatches = detectOptionLetterMatches(transcript, speechOptionLettersRef.current);
+      const matches = [...new Set([...keywordMatches, ...optionMatches])];
+      if (matches.length === 0) return;
 
-      const matches = [...new Set(words.filter((word) => keywords.has(word)))];
       const now = Date.now();
-      if (matches.length >= 3 && now - speechAlertCooldownRef.current > 30000) {
+      if (matches.length >= 1 && now - speechAlertCooldownRef.current > 20000) {
         speechAlertCooldownRef.current = now;
         reportEvent(
           'speech_match_detected',
-          'Speech matched exam keywords; review transcript context',
-          'medium',
+          'Speech matched exam question or answer keywords; review transcript context',
+          'high',
           {
             transcript: transcript.slice(0, 240),
             matches: matches.slice(0, 12),
             matchCount: matches.length,
+            keywordMatches: keywordMatches.slice(0, 12),
+            optionMatches,
           }
         );
         setLastAlert({
@@ -457,15 +510,20 @@ const ProctoringMonitor = forwardRef(function ProctoringMonitor(
     };
     draw();
 
-    const stream = canvas.captureStream(4);
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
-      ? 'video/webm;codecs=vp8'
+    const canvasStream = canvas.captureStream(4);
+    const audioTracks = webcamStreamRef.current?.getAudioTracks?.() || [];
+    const stream = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+      ? 'video/webm;codecs=vp8,opus'
+      : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+        ? 'video/webm;codecs=vp8'
       : 'video/webm';
 
     recordChunksRef.current = [];
     const recorder = new MediaRecorder(stream, {
       mimeType,
       videoBitsPerSecond: 600000,
+      audioBitsPerSecond: audioTracks.length ? 64000 : undefined,
     });
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) recordChunksRef.current.push(e.data);

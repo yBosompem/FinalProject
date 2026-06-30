@@ -34,13 +34,19 @@ export function AuthProvider({ children }) {
     return u;
   };
 
+  const updateReferenceNumber = async (referenceNumber) => {
+    const { user: u } = await api.updateReferenceNumber(referenceNumber);
+    setUser(u);
+    return u;
+  };
+
   const logout = () => {
     localStorage.removeItem('token');
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, updateReferenceNumber, logout }}>
       {children}
     </AuthContext.Provider>
   );

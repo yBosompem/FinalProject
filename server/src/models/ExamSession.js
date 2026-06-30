@@ -29,6 +29,7 @@ const examSessionSchema = new mongoose.Schema(
     startedAt: { type: Date, default: Date.now },
     endsAt: { type: Date, required: true },
     submittedAt: { type: Date },
+    questionOrder: [{ type: Number }],
     answers: [answerSchema],
     riskScore: { type: Number, default: 0, min: 0, max: 100 },
     alertCount: { type: Number, default: 0 },

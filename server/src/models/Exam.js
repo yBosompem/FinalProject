@@ -26,6 +26,7 @@ const examSchema = new mongoose.Schema(
     isPublished: { type: Boolean, default: false },
     showResultsToStudents: { type: Boolean, default: false },
     allowScientificCalculator: { type: Boolean, default: false },
+    shuffleQuestions: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     availableFrom: { type: Date },
     availableUntil: { type: Date },

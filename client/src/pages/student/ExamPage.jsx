@@ -6,8 +6,8 @@ import ProctoringMonitor from '../../components/ProctoringMonitor';
 import QuestionNavigator, { isFlagged } from '../../components/QuestionNavigator';
 
 function emptyAnswers(questions) {
-  return questions.map((_, i) => ({
-    questionIndex: i,
+  return questions.map((q, i) => ({
+    questionIndex: q?.originalIndex ?? i,
     selectedIndex: null,
     textAnswer: '',
     flagged: false,
@@ -24,7 +24,8 @@ function formatTime(ms) {
 
 function countAnswered(answers, questions) {
   return questions.reduce((n, q, i) => {
-    const a = answers.find((x) => x.questionIndex === i);
+    const questionIndex = q?.originalIndex ?? i;
+    const a = answers.find((x) => x.questionIndex === questionIndex);
     if ((q?.type || 'mcq') === 'short') return n + (a?.textAnswer?.trim() ? 1 : 0);
     return n + (a?.selectedIndex != null && a.selectedIndex >= 0 ? 1 : 0);
   }, 0);
@@ -594,18 +595,21 @@ export default function ExamPage() {
         }
 
         const examData = await api.getExam(examId);
-        setExam(examData);
 
         if (status.canResume && status.session?.status === 'in_progress') {
+          const sessionExam = status.session.exam || examData;
+          setExam(sessionExam);
           setSession(status.session);
           setAnswers(
             status.session.answers?.length
               ? status.session.answers
-              : emptyAnswers(examData.questions)
+              : emptyAnswers(sessionExam.questions)
           );
           const left = new Date(status.session.endsAt) - Date.now();
           setRemaining(left);
           setTotalDuration(left);
+        } else {
+          setExam(examData);
         }
 
         setPhase('precheck-camera');
@@ -636,9 +640,11 @@ export default function ExamPage() {
       await returnToExamMode();
 
       const sess = session || (await api.startSession(examId));
+      const sessionExam = sess.exam || exam;
+      setExam(sessionExam);
       setSession(sess);
       setAnswers(
-        sess.answers?.length ? sess.answers : emptyAnswers(exam.questions)
+        sess.answers?.length ? sess.answers : emptyAnswers(sessionExam.questions)
       );
       const duration = new Date(sess.endsAt) - Date.now();
       setRemaining(duration);
@@ -898,6 +904,7 @@ export default function ExamPage() {
   const isRulesCheck = phase === 'precheck-rules';
   const setupMode = isCameraCheck ? 'webcam' : isScreenCheck ? 'screen' : 'all';
   const question = isExam ? exam.questions[currentQ] : null;
+  const currentQuestionIndex = question?.originalIndex ?? currentQ;
   const urgent = remaining < 60000;
   const timePct = totalDuration > 0 ? Math.max(0, (remaining / totalDuration) * 100) : 0;
   const answeredCount = isExam ? countAnswered(answers, exam.questions) : 0;
@@ -1200,10 +1207,10 @@ export default function ExamPage() {
                         />
                         <button
                           type="button"
-                          className={`btn-flag${isFlagged(answers, currentQ) ? ' btn-flag--active' : ''}`}
-                          onClick={() => toggleFlag(currentQ)}
+                          className={`btn-flag${isFlagged(answers, currentQuestionIndex) ? ' btn-flag--active' : ''}`}
+                          onClick={() => toggleFlag(currentQuestionIndex)}
                         >
-                          {isFlagged(answers, currentQ) ? 'Flagged' : 'Flag'}
+                          {isFlagged(answers, currentQuestionIndex) ? 'Flagged' : 'Flag'}
                         </button>
                       </div>
                       <span className="exam-question-label">
@@ -1218,8 +1225,8 @@ export default function ExamPage() {
                         <label className="label">Your answer</label>
                         <input
                           className="input"
-                          value={answers.find((a) => a.questionIndex === currentQ)?.textAnswer || ''}
-                          onChange={(e) => setTextAnswer(currentQ, e.target.value)}
+                          value={answers.find((a) => a.questionIndex === currentQuestionIndex)?.textAnswer || ''}
+                          onChange={(e) => setTextAnswer(currentQuestionIndex, e.target.value)}
                           disabled={!proctoringReady}
                           placeholder="Type your answer"
                         />
@@ -1228,7 +1235,7 @@ export default function ExamPage() {
                       <div className="exam-options">
                         {(question.options || []).map((opt, idx) => {
                           const selected =
-                            answers.find((a) => a.questionIndex === currentQ)?.selectedIndex === idx;
+                            answers.find((a) => a.questionIndex === currentQuestionIndex)?.selectedIndex === idx;
                           return (
                             <label
                               key={idx}
@@ -1239,7 +1246,7 @@ export default function ExamPage() {
                                 type="radio"
                                 name={`q-${currentQ}`}
                                 checked={selected}
-                                onChange={() => selectAnswer(currentQ, idx)}
+                                onChange={() => selectAnswer(currentQuestionIndex, idx)}
                                 disabled={!proctoringReady}
                               />
                               <span className="exam-option-letter">{String.fromCharCode(65 + idx)}</span>

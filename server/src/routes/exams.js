@@ -91,6 +91,9 @@ function normalizeExamSettings(body) {
   if (Object.prototype.hasOwnProperty.call(body, 'allowScientificCalculator')) {
     updates.allowScientificCalculator = toBoolean(body.allowScientificCalculator);
   }
+  if (Object.prototype.hasOwnProperty.call(body, 'shuffleQuestions')) {
+    updates.shuffleQuestions = toBoolean(body.shuffleQuestions);
+  }
   return updates;
 }
 
@@ -144,7 +147,8 @@ router.get('/:id', async (req, res) => {
     const payload = exam.toObject();
     if (req.user.role === 'student') {
       payload.questions = payload.questions.map((q, i) => ({
-        questionNumber: q.questionNumber ?? i + 1,
+        originalIndex: i,
+        questionNumber: i + 1,
         text: q.text,
         type: q.type || 'mcq',
         options: q.options || [],
@@ -168,6 +172,7 @@ router.post('/', requireRole('admin'), async (req, res) => {
       isPublished,
       showResultsToStudents,
       allowScientificCalculator,
+      shuffleQuestions,
       maxGradePoints,
       availableFrom,
       availableUntil,
@@ -190,6 +195,7 @@ router.post('/', requireRole('admin'), async (req, res) => {
       isPublished: Boolean(isPublished),
       showResultsToStudents: toBoolean(showResultsToStudents),
       allowScientificCalculator: toBoolean(allowScientificCalculator),
+      shuffleQuestions: toBoolean(shuffleQuestions),
       availableFrom: availableFrom || undefined,
       availableUntil: availableUntil || undefined,
       ...target,
